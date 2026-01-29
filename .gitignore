@@ -1,0 +1,12 @@
+/dados.json
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+dist/
+build/
+*.spec
+
+.env

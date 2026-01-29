@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Estoque Restaurante</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    h1 { margin-bottom: 6px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; flex: 1; min-width: 260px; }
+    label { display:block; margin-top: 8px; font-size: 14px; }
+    input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 10px; padding: 10px 12px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; }
+    .muted { color: #666; font-size: 14px; }
+    .ok { color: #0a7; }
+    .err { color: #c00; }
+    code { background: #f6f6f6; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Estoque Restaurante</h1>
+  <div class="muted">Front simples falando com sua API em <code>/api</code>.</div>
+
+  <div class="row" style="margin-top: 16px;">
+    <div class="card">
+      <h3>Cadastrar produto</h3>
+      <label>Nome</label>
+      <input id="nome" placeholder="Arroz" />
+      <label>Unidade</label>
+      <input id="unidade" placeholder="kg" />
+      <label>Estoque mínimo</label>
+      <input id="minimo" type="number" step="0.01" placeholder="5" />
+      <button onclick="cadastrar()">Cadastrar</button>
+      <div id="msgCadastro"></div>
+    </div>
+
+    <div class="card">
+<h3>Movimentar estoque</h3>
+
+<label>Produto</label>
+<input id="movProduto" list="produtosList" placeholder="Digite para buscar (ex: arr)..." style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;" />
+<datalist id="produtosList"></datalist>
+
+<label>Quantidade</label>
+<input id="movQtd" type="number" step="0.01" placeholder="1.5" />
+
+<div style="display:flex; gap:10px;">
+  <button onclick="entrada()">Entrada</button>
+  <button onclick="saida()">Saída</button>
+</div>
+
+<div id="msgMov"></div>
+
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+      <h3 style="margin:0;">Produtos</h3>
+      <div style="display:flex; gap:10px;">
+        <button onclick="carregar()">Atualizar lista</button>
+        <button onclick="carregarAbaixo()">Abaixo do mínimo</button>
+      </div>
+    </div>
+    <div id="msgLista" class="muted"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Nome</th><th>Unidade</th><th>Atual</th><th>Mínimo</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+<script>
+  const apiBase = "/api";
+  let produtosCache = [];
+  let textoParaId = new Map();
+
+  function setMsg(id, text, ok = true) {
+    const el = document.getElementById(id);
+    el.className = ok ? "ok" : "err";
+    el.textContent = text;
+  }
+
+  async function request(path, options = {}) {
+    const res = await fetch(apiBase + path, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const msg = data?.detail || ("Erro HTTP " + res.status);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  function renderTable(produtos) {
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+    for (const p of produtos) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${p.id}</td>
+        <td>${p.nome}</td>
+        <td>${p.unidade}</td>
+        <td>${p.estoque_atual}</td>
+        <td>${p.estoque_minimo}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function preencherDatalist(produtos) {
+    const list = document.getElementById("produtosList");
+    list.innerHTML = "";
+    textoParaId = new Map();
+
+    for (const p of produtos) {
+      const texto = `${p.nome} (${p.unidade})`;
+      textoParaId.set(texto, Number(p.id));
+
+      const opt = document.createElement("option");
+      opt.value = texto; // é isso que aparece nas sugestões
+      list.appendChild(opt);
+    }
+  }
+
+  function getProdutoIdDoInput() {
+    const texto = document.getElementById("movProduto").value;
+    return textoParaId.get(texto) ?? null;
+  }
+
+  async function carregar() {
+    try {
+      setMsg("msgLista", "Carregando...", true);
+      const produtos = await request("/produtos");
+      produtosCache = produtos;
+
+      renderTable(produtos);
+      preencherDatalist(produtos);
+
+      setMsg("msgLista", `OK: ${produtos.length} produto(s).`, true);
+    } catch (e) {
+      setMsg("msgLista", e.message, false);
+    }
+  }
+
+  async function carregarAbaixo() {
+    try {
+      setMsg("msgLista", "Carregando abaixo do mínimo...", true);
+      const abaixo = await request("/produtos/abaixo-minimo");
+      renderTable(abaixo);
+
+      // mantém sugestões com todos os produtos
+      const produtos = await request("/produtos");
+      produtosCache = produtos;
+      preencherDatalist(produtos);
+
+      setMsg("msgLista", `Abaixo do mínimo: ${abaixo.length} produto(s).`, true);
+    } catch (e) {
+      setMsg("msgLista", e.message, false);
+    }
+  }
+
+  async function cadastrar() {
+    try {
+      const nome = document.getElementById("nome").value;
+      const unidade = document.getElementById("unidade").value;
+      const estoque_minimo = Number(document.getElementById("minimo").value);
+
+      const body = JSON.stringify({ nome, unidade, estoque_minimo });
+      const produto = await request("/produtos", { method: "POST", body });
+
+      setMsg("msgCadastro", `Cadastrado: ${produto.nome} (id=${produto.id})`, true);
+      await carregar();
+    } catch (e) {
+      setMsg("msgCadastro", e.message, false);
+    }
+  }
+
+  async function entrada() {
+    try {
+      const produto_id = getProdutoIdDoInput();
+      if (!produto_id) throw new Error("Selecione um produto pela lista de sugestões.");
+
+      const quantidade = Number(document.getElementById("movQtd").value);
+      const body = JSON.stringify({ produto_id, quantidade });
+
+      const resp = await request("/estoque/entrada", { method: "POST", body });
+      setMsg("msgMov", `Entrada OK. Novo estoque: ${resp.produto.estoque_atual}`, true);
+      await carregar();
+    } catch (e) {
+      setMsg("msgMov", e.message, false);
+    }
+  }
+
+  async function saida() {
+    try {
+      const produto_id = getProdutoIdDoInput();
+      if (!produto_id) throw new Error("Selecione um produto pela lista de sugestões.");
+
+      const quantidade = Number(document.getElementById("movQtd").value);
+      const body = JSON.stringify({ produto_id, quantidade });
+
+      const resp = await request("/estoque/saida", { method: "POST", body });
+      setMsg("msgMov", `Saída OK. Novo estoque: ${resp.produto.estoque_atual}`, true);
+      await carregar();
+    } catch (e) {
+      setMsg("msgMov", e.message, false);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    carregar();
+  });
+</script>
+</body>
+</html>
