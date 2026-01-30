@@ -1,10 +1,37 @@
 from pathlib import Path
+import sys
+import os
 
-# Pasta raiz do projeto (um nível acima de /src)
-ROOT_DIR = Path(__file__).resolve().parents[1]
+APP_NAME = "EstoqueONG"
 
-# Arquivo de dados (fica na raiz do projeto)
-ARQUIVO_DADOS = ROOT_DIR / "dados.json"
 
-# Pasta dos arquivos estáticos (HTML/JS/CSS)
-PUBLIC_DIR = ROOT_DIR / "public"
+def pasta_app() -> Path:
+    # Quando empacotado (PyInstaller), sys.executable aponta pro .exe
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    # Em desenvolvimento, aponta para a raiz do projeto (um nível acima de /src)
+    return Path(__file__).resolve().parents[1]
+
+
+def pasta_dados() -> Path:
+    """
+    Pasta oficial de dados por usuário no Windows:
+    %APPDATA%\\EstoqueONG
+    """
+    appdata = os.getenv("APPDATA")
+    base = Path(appdata) if appdata else Path.home()
+    d = base / APP_NAME
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# Recursos do app (ficam junto do exe/projeto)
+APP_DIR = pasta_app()
+PUBLIC_DIR = APP_DIR / "public"
+ICONE_ICO = APP_DIR / "assets" / "icon.ico"
+
+# Dados do usuário (não dependem da pasta do exe)
+DADOS_DIR = pasta_dados()
+ARQUIVO_DADOS = DADOS_DIR / "dados.json"
+BACKUP_DIR = DADOS_DIR / "backup"
+BACKUP_DIR.mkdir(exist_ok=True)

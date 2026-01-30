@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "nome": "Arroz",
+    "unidade": "kg",
+    "estoque_atual": 35.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 2,
+    "nome": "Feijao",
+    "unidade": "kg",
+    "estoque_atual": 22.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 3,
+    "nome": "Arroz Branco Tipo 1",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 4,
+    "nome": "Arroz Branco Tipo 2",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 5,
+    "nome": "Arroz Branco Tipo 3",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 6,
+    "nome": "Feijão Fradinho",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 7,
+    "nome": "Cenoura",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 8,
+    "nome": "Batata Inglesa",
+    "unidade": "kg",
+    "estoque_atual": 10.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 9,
+    "nome": "Tomate Cereja",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  },
+  {
+    "id": 10,
+    "nome": "Beterraba",
+    "unidade": "kg",
+    "estoque_atual": 0.0,
+    "estoque_minimo": 10.0
+  }
+]

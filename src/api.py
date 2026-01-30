@@ -11,11 +11,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Mesmo arquivo que você já usa
-ARQUIVO_DADOS = Path(__file__).resolve().parents[1] / "dados.json"
+from src.config import ARQUIVO_DADOS, PUBLIC_DIR
+
 
 app = FastAPI(title="Estoque Restaurante API", version="1.0")
 
-PUBLIC_DIR = Path(__file__).resolve().parents[1] / "public"
+from src.config import ARQUIVO_DADOS, PUBLIC_DIR
+
 
 # Serve arquivos estáticos (ex: /static/...)
 app.mount("/static", StaticFiles(directory=PUBLIC_DIR), name="static")

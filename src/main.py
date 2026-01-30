@@ -1,9 +1,7 @@
 import json
-from pathlib import Path
+from config import ARQUIVO_DADOS
 from typing import Optional
 
-# Arquivo onde os dados serão salvos (na raiz do projeto)
-ARQUIVO_DADOS = Path(__file__).resolve().parents[1] / "dados.json"
 
 
 def mostrar_menu():
