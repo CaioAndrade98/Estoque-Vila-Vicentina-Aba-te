@@ -1,48 +1,31 @@
-import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 import unicodedata
 import re
 
-from config import ARQUIVO_DADOS, ICONE_ICO  # gui.py e config.py estão em src/
-
+from .config import ICONE_ICO  # gui.py e config.py estão em src/
+from .estoque_core import (
+    listar_produtos,
+    criar_produto,
+    move_stock_by_id,
+    ProdutoNaoEncontrado,
+    EstoqueInsuficiente,
+    ProdutoDuplicado,
+)
 
 def carregar_produtos() -> list[dict]:
-    """Lê o dados.json (lista de produtos). Se não existir/der erro, volta lista vazia."""
-    if not ARQUIVO_DADOS.exists():
-        return []
-    try:
-        with ARQUIVO_DADOS.open("r", encoding="utf-8") as f:
-            dados = json.load(f)
-        return dados if isinstance(dados, list) else []
-    except Exception:
-        return []
+    """Carrega a lista de produtos pelo core (fonte única)."""
+    return listar_produtos()
 
 
 def salvar_produtos(produtos: list[dict]) -> None:
-    # 1) salva o arquivo principal
-    with ARQUIVO_DADOS.open("w", encoding="utf-8") as f:
-        json.dump(produtos, f, ensure_ascii=False, indent=2)
-
-    # 2) cria backup (pasta backup/ ao lado do dados.json)
-    try:
-        from datetime import datetime
-        backup_dir = ARQUIVO_DADOS.parent / "backup"
-        backup_dir.mkdir(exist_ok=True)
-
-        carimbo = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        backup_file = backup_dir / f"dados_backup_{carimbo}.json"
-
-        with backup_file.open("w", encoding="utf-8") as bf:
-            json.dump(produtos, bf, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """Compatibilidade: persistência é feita no core."""
+    pass
 
 
 def gerar_proximo_id(produtos: list[dict]) -> int:
-    if not produtos:
-        return 1
-    return max(int(p.get("id", 0)) for p in produtos) + 1
+    """Compatibilidade: IDs são gerados no core."""
+    raise NotImplementedError("IDs são gerados no core")
 
 
 def normalizar_nome(nome: str) -> str:
@@ -177,23 +160,14 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
             messagebox.showwarning("Atenção", "Estoque mínimo inválido. Use um número (ex: 2 ou 2,5).")
             return
 
-        produtos = carregar_produtos()
-
-        nome_norm = normalizar_nome(nome)
-        for p in produtos:
-            if normalizar_nome(str(p.get("nome", ""))) == nome_norm:
-                messagebox.showerror("Erro", "Já existe um item com esse nome.")
-                return
-
-        novo = {
-            "id": gerar_proximo_id(produtos),
-            "nome": nome,
-            "unidade": unidade,
-            "estoque_atual": 0.0,
-            "estoque_minimo": float(minimo),
-        }
-        produtos.append(novo)
-        salvar_produtos(produtos)
+        try:
+            criar_produto(nome=nome, unidade=unidade, estoque_minimo=float(minimo))
+        except ProdutoDuplicado:
+            messagebox.showerror("Erro", "Já existe um item com esse nome.")
+            return
+        except ValueError as e:
+            messagebox.showerror("Erro", str(e))
+            return
 
         messagebox.showinfo("OK", "Item cadastrado com sucesso.")
         win.destroy()
@@ -202,23 +176,13 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
 
 
 def atualizar_estoque(produto_id: int, delta: float) -> None:
-    produtos = carregar_produtos()
-    alvo = None
-    for p in produtos:
-        if int(p.get("id", 0)) == int(produto_id):
-            alvo = p
-            break
-    if not alvo:
-        raise ValueError("Item não encontrado.")
-
-    atual = float(alvo.get("estoque_atual", 0))
-    novo = atual + float(delta)
-    if novo < 0:
-        raise ValueError("Estoque insuficiente.")
-
-    alvo["estoque_atual"] = novo
-    salvar_produtos(produtos)
-
+    """Movimenta estoque usando o core (regra única)."""
+    try:
+        move_stock_by_id(produto_id, delta)
+    except ProdutoNaoEncontrado as e:
+        raise ValueError(str(e))
+    except EstoqueInsuficiente as e:
+        raise ValueError(str(e))
 
 def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     # tipo: "entrada" ou "saida"

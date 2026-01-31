@@ -1,12 +1,13 @@
-/dados.json
-
+# Python
 __pycache__/
 *.pyc
-.venv/
-venv/
 
-dist/
+# PyInstaller
 build/
+dist/
+src/build/
+src/dist/
 *.spec
 
-.env
+# Dados locais
+backup/
