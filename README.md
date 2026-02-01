@@ -25,6 +25,15 @@ O foco não foi “mostrar tecnologia”, mas **resolver um problema prático**,
 
 ---
 
+## ✅ Como testar (Windows)
+
+1. Acesse a aba **Releases** deste repositório
+2. Baixe o arquivo `.zip` da versão mais recente
+3. Extraia a pasta
+4. Execute `EstoqueONG.exe`
+
+Os dados do sistema são salvos automaticamente em `%APPDATA%\EstoqueONG`.
+
 ## 🖥️ Interface (GUI)
 
 - Interface gráfica desenvolvida com **Tkinter**
