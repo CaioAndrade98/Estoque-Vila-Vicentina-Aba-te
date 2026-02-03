@@ -109,3 +109,11 @@ Projeto funcional, em uso de testes e preparado para futuras melhorias, como:
 - exportação de dados
 - controle de usuários
 - execução em rede local
+
+## ✨ Melhorias recentes (v0.1.1)
+
+- Aviso visual ao tentar retirar quantidade maior que o estoque disponível
+- Bloqueio da confirmação em operações de saída inválidas
+- Fluxo contínuo para entrada e saída de estoque
+- Feedback visual discreto, com menos popups
+
