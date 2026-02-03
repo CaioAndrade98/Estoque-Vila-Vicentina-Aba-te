@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any, Dict, List
+from .config import ARQUIVO_DADOS, BACKUP_DIR, ARQUIVO_HISTORICO
 
-from .config import ARQUIVO_DADOS, BACKUP_DIR
+import csv
+from pathlib import Path
+
 
 
 class ProdutoNaoEncontrado(Exception):
@@ -47,6 +50,36 @@ def _salvar_produtos(produtos: List[Dict[str, Any]]) -> None:
         with backup_file.open("w", encoding="utf-8") as bf:
             json.dump(produtos, bf, ensure_ascii=False, indent=2)
     except Exception:
+        pass
+
+def _registrar_movimento(
+    produto_id: int,
+    nome: str,
+    delta: float,
+    estoque_antes: float,
+    estoque_depois: float,
+) -> None:
+    """
+    Registra um movimento em JSON Lines (%APPDATA%\\EstoqueONG\\historico\\movimentos.jsonl).
+    Um JSON por linha para ser fácil de ler/exportar depois.
+    """
+    try:
+        evento = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "produto_id": int(produto_id),
+            "nome": str(nome),
+            "delta": float(delta),  # +entrada / -saida
+            "estoque_antes": float(estoque_antes),
+            "estoque_depois": float(estoque_depois),
+        }
+
+        # garante pasta (por segurança)
+        ARQUIVO_HISTORICO.parent.mkdir(parents=True, exist_ok=True)
+
+        with ARQUIVO_HISTORICO.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(evento, ensure_ascii=False) + "\n")
+    except Exception:
+        # Histórico nunca pode quebrar o app
         pass
 
 
@@ -116,7 +149,17 @@ def move_stock_by_id(produto_id: int, delta: float) -> Dict[str, Any]:
                 raise EstoqueInsuficiente(f"Estoque insuficiente para '{p.get('nome', '')}'.")
             p["estoque_atual"] = float(novo)
             _salvar_produtos(produtos)
+
+            _registrar_movimento(
+                produto_id=pid,
+                nome=str(p.get("nome", "")),
+                delta=float(d),
+                estoque_antes=float(atual),
+                estoque_depois=float(novo),
+)
+
             return p
+
 
     raise ProdutoNaoEncontrado(f"Produto com id {pid} não encontrado.")
 
@@ -128,3 +171,136 @@ def produtos_abaixo_minimo() -> List[Dict[str, Any]]:
         p for p in produtos
         if float(p.get("estoque_atual", 0.0)) < float(p.get("estoque_minimo", 0.0))
     ]
+
+def listar_movimentos(limite: int | None = None) -> list[dict]:
+    """
+    Retorna os movimentos do histórico (mais recentes por último).
+    Se limite for informado, retorna apenas os últimos N movimentos.
+    """
+    if not ARQUIVO_HISTORICO.exists():
+        return []
+
+    movimentos: list[dict] = []
+
+    try:
+        with ARQUIVO_HISTORICO.open("r", encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if not linha:
+                    continue
+                try:
+                    movimentos.append(json.loads(linha))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+
+    if limite is not None and limite > 0:
+        return movimentos[-limite:]
+
+    return movimentos
+
+def exportar_movimentos_csv(caminho_csv: str | Path, limite: int | None = None) -> Path:
+    """
+    Exporta o histórico de movimentos para CSV.
+    Retorna o Path do arquivo gerado.
+    """
+    caminho = Path(caminho_csv)
+
+    movimentos = listar_movimentos(limite=limite)
+
+    # garante pasta do arquivo
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+
+    with caminho.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["ts", "produto_id", "nome", "delta", "estoque_antes", "estoque_depois"])
+
+        for m in movimentos:
+            w.writerow([
+                m.get("ts", ""),
+                m.get("produto_id", ""),
+                m.get("nome", ""),
+                m.get("delta", ""),
+                m.get("estoque_antes", ""),
+                m.get("estoque_depois", ""),
+            ])
+
+    return caminho
+
+def exportar_movimentos_xlsx(caminho_xlsx, movimentos):
+    """
+    Exporta uma lista de movimentos para um arquivo Excel (.xlsx)
+    com formatação básica (cabeçalho, larguras, data formatada).
+    """
+    from pathlib import Path
+    from datetime import datetime
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    caminho = Path(caminho_xlsx)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Histórico"
+
+    cabecalho = ["Data/Hora", "ID", "Item", "Tipo", "Quantidade", "Antes", "Depois"]
+
+    ws.append(cabecalho)
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="DDDDDD")
+    header_align = Alignment(horizontal="center")
+
+    for col in range(1, len(cabecalho) + 1):
+        c = ws.cell(row=1, column=col)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = header_align
+
+    ws.freeze_panes = "A2"
+
+    for m in movimentos:
+        delta = float(m.get("delta", 0))
+        tipo = "Entrada" if delta > 0 else "Saída"
+        qtd = abs(delta)
+
+        ts = m.get("ts", "")
+        try:
+            ts = datetime.fromisoformat(ts)
+        except Exception:
+            pass
+
+        ws.append([
+            ts,
+            m.get("produto_id", ""),
+            m.get("nome", ""),
+            tipo,
+            qtd,
+            m.get("estoque_antes", ""),
+            m.get("estoque_depois", ""),
+        ])
+
+    # Formatos
+    for row in ws.iter_rows(min_row=2):
+        if hasattr(row[0].value, "year"):
+            row[0].number_format = "dd/mm/yyyy hh:mm"
+
+        for idx in (4, 5, 6):
+            row[idx].alignment = Alignment(horizontal="center")
+
+    # Ajuste de largura
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 40)
+
+    wb.save(caminho)
+    return caminho
+
+

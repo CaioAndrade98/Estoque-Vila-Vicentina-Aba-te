@@ -11,10 +11,12 @@ from .estoque_core import (
     criar_produto,
     move_stock_by_id,
     produtos_abaixo_minimo,
+    listar_movimentos,
     ProdutoNaoEncontrado,
     EstoqueInsuficiente,
     ProdutoDuplicado,
 )
+
 
 app = FastAPI(title="Estoque ONG API", version="1.0")
 
@@ -81,3 +83,18 @@ def api_saida_estoque(payload: MovimentoEstoque):
 def api_abaixo_minimo():
     abaixo = produtos_abaixo_minimo()
     return sorted(abaixo, key=lambda x: str(x.get("nome", "")).lower())
+
+@app.get("/api/historico")
+def api_historico(limite: int = 200):
+    """
+    Retorna o histórico de movimentações (mais recentes primeiro).
+    limite: quantos eventos retornar (padrão 200).
+    """
+    if limite < 1:
+        limite = 1
+    if limite > 5000:
+        limite = 5000  # evita respostas gigantes
+
+    movimentos = listar_movimentos(limite=limite)
+    movimentos = list(reversed(movimentos))  # mais recentes primeiro
+    return movimentos

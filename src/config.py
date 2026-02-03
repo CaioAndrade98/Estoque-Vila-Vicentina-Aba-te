@@ -35,3 +35,8 @@ DADOS_DIR = pasta_dados()
 ARQUIVO_DADOS = DADOS_DIR / "dados.json"
 BACKUP_DIR = DADOS_DIR / "backup"
 BACKUP_DIR.mkdir(exist_ok=True)
+
+HISTORICO_DIR = DADOS_DIR / "historico"
+ARQUIVO_HISTORICO = HISTORICO_DIR / "movimentos.jsonl"
+HISTORICO_DIR.mkdir(exist_ok=True)
+
