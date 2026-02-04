@@ -58,6 +58,7 @@ def _registrar_movimento(
     delta: float,
     estoque_antes: float,
     estoque_depois: float,
+    motivo: str | None = None,
 ) -> None:
     """
     Registra um movimento em JSON Lines (%APPDATA%\\EstoqueONG\\historico\\movimentos.jsonl).
@@ -72,6 +73,9 @@ def _registrar_movimento(
             "estoque_antes": float(estoque_antes),
             "estoque_depois": float(estoque_depois),
         }
+
+        if motivo:
+            evento["motivo"] = str(motivo)
 
         # garante pasta (por segurança)
         ARQUIVO_HISTORICO.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +132,7 @@ def criar_produto(nome: str, unidade: str, estoque_minimo: float) -> Dict[str, A
     return novo
 
 
-def move_stock_by_id(produto_id: int, delta: float) -> Dict[str, Any]:
+def move_stock_by_id(produto_id: int, delta: float, motivo: str | None = None) -> Dict[str, Any]:
     """Movimenta estoque_atual por ID. delta positivo=entrada; negativo=saída."""
     try:
         pid = int(produto_id)

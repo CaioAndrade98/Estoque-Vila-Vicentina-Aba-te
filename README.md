@@ -14,14 +14,14 @@ O foco não foi “mostrar tecnologia”, mas **resolver um problema prático**,
 
 ---
 
-## 🧩 Funcionalidades
+## Funcionalidades
 
-- Cadastro de produtos com unidade e estoque mínimo  
-- Entrada e saída de estoque  
-- Listagem e busca de produtos (com filtro progressivo)  
-- Identificação automática de itens abaixo do estoque mínimo  
-- Persistência local dos dados (sem risco de perda ao fechar o app)  
-- API interna para integração e futuras expansões  
+- Cadastro de itens
+- Entrada e saída de estoque
+- Dashboard com visão geral
+- Histórico com exportação CSV/Excel
+- Relatórios por período
+- Inventário guiado
 
 ---
 
@@ -117,3 +117,10 @@ Projeto funcional, em uso de testes e preparado para futuras melhorias, como:
 - Fluxo contínuo para entrada e saída de estoque
 - Feedback visual discreto, com menos popups
 
+
+### v0.2.0
+- Dashboard de visão geral
+- Histórico avançado
+- Relatórios por período
+- Inventário guiado
+- Melhorias de UX

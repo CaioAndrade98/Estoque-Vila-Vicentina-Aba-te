@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import unicodedata
 import re
+from datetime import datetime, date, timedelta
+import csv
 
 from .config import ICONE_ICO  # gui.py e config.py estão em src/
 from .estoque_core import (
@@ -80,6 +82,55 @@ def match_tokens_em_ordem(query_tokens: list[str], name_tokens: list[str]) -> bo
     return False
 
 
+# =========================
+# UX: foco consistente (evita botão "marcado")
+# =========================
+def _restaurar_foco_menu(root: tk.Tk) -> None:
+    """Volta o foco para o menu principal (frame), evitando botão 'marcado'."""
+    w = getattr(root, "_menu_focus_widget", None)
+    if w is not None:
+        try:
+            w.focus_set()
+        except Exception:
+            pass
+    else:
+        try:
+            root.focus_set()
+        except Exception:
+            pass
+
+
+def _configurar_fechamento_toplevel(win: tk.Toplevel, root: tk.Tk) -> None:
+    """Quando fechar a janela, devolve foco para o menu principal."""
+    def _on_close():
+        try:
+            win.destroy()
+        finally:
+            root.after(0, lambda: _restaurar_foco_menu(root))
+
+    win.protocol("WM_DELETE_WINDOW", _on_close)
+
+
+def _parse_iso_ts(ts: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(ts))
+    except Exception:
+        return None
+
+
+def _fmt_dt_br(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def _safe_float(x, default=0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+
 def abrir_tela_produtos(root: tk.Tk) -> None:
     produtos = carregar_produtos()
     produtos = sorted(produtos, key=lambda p: str(p.get("nome", "")).lower())
@@ -87,6 +138,7 @@ def abrir_tela_produtos(root: tk.Tk) -> None:
     win = tk.Toplevel(root)
     win.title("Itens")
     win.geometry("720x420")
+    _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -131,6 +183,7 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
     win.title("Cadastrar Item")
     win.geometry("520x300")
     win.minsize(520, 300)
+    _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -205,7 +258,7 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
         minimo_var.set("")
         nome_entry.focus_set()
 
-    ttk.Button(frame, text="Salvar", command=salvar).pack(anchor="e")
+    ttk.Button(frame, text="Salvar", command=salvar, takefocus=False).pack(anchor="e")
 
     nome_entry.bind("<Return>", lambda e: unidade_entry.focus_set())
     unidade_entry.bind("<Return>", lambda e: minimo_entry.focus_set())
@@ -245,6 +298,7 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     win = tk.Toplevel(root)
     win.title("Entrada de Estoque" if tipo == "entrada" else "Saída de Estoque")
     win.geometry("560x470")  # ligeiro aumento para caber prévia/status
+    _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -340,6 +394,15 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
         activestyle="none",
         exportselection=False,
         yscrollcommand=yscroll.set,
+
+        bg="#ffffff",
+        fg="#1f2933",
+        selectbackground="#2563eb",
+        selectforeground="#ffffff",
+        highlightthickness=1,
+        highlightbackground="#d1d5db",
+        relief="flat",
+        borderwidth=0,
     )
     lb.pack(side="left", fill="both", expand=True)
     yscroll.config(command=lb.yview)
@@ -430,7 +493,7 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
             lb.activate(0)
             lb.see(0)
             _atualizar_preview()
-            _avaliar_warn_saida()  # ✅ reavalia aviso ao reduzir para 1 item
+            _avaliar_warn_saida()
         else:
             preview_var.set("Selecione um item para ver o estoque atual.")
 
@@ -504,7 +567,6 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     def _avaliar_warn_saida(event=None):
         nonlocal _warn_ativa, status_after_id
 
-        # padrão: habilitado
         try:
             btn_confirmar.state(["!disabled"])
         except Exception:
@@ -525,14 +587,10 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
             return
 
         p = id_para_produto.get(int(pid), {})
-        try:
-            atual = float(p.get("estoque_atual", 0))
-        except Exception:
-            atual = 0.0
+        atual = _safe_float(p.get("estoque_atual", 0), 0.0)
 
         txt = qtd_var.get().strip()
         if not txt:
-            # campo vazio: limpa aviso e deixa botão habilitado
             if _warn_ativa:
                 status_var.set("")
             _warn_ativa = False
@@ -541,7 +599,6 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
         try:
             qtd = float(txt.replace(",", "."))
         except Exception:
-            # digitando: não trava botão
             if _warn_ativa:
                 status_var.set("")
             _warn_ativa = False
@@ -550,7 +607,6 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
         if qtd > atual:
             _warn_ativa = True
 
-            # 🔒 fixa o aviso: cancela auto-clear
             if status_after_id is not None:
                 try:
                     win.after_cancel(status_after_id)
@@ -561,13 +617,11 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
             lbl_status.configure(foreground=CORES.get("warn", "#b26a00"))
             status_var.set(f"⚠ Atenção: {qtd} é maior que o estoque atual ({atual}).")
 
-            # 🚫 desabilita confirmar enquanto estiver inválido
             try:
                 btn_confirmar.state(["disabled"])
             except Exception:
                 pass
         else:
-            # corrigiu: limpa aviso e habilita botão
             if _warn_ativa:
                 status_var.set("")
             _warn_ativa = False
@@ -575,7 +629,6 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
                 btn_confirmar.state(["!disabled"])
             except Exception:
                 pass
-
 
     def on_lista_select(event=None):
         _atualizar_preview()
@@ -586,14 +639,11 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     lb.bind("<Double-Button-1>", on_lista_double)
     lb.bind("<Escape>", on_lista_escape)
 
-    # Avalia aviso enquanto digita a quantidade
     ent_qtd.bind("<KeyRelease>", _avaliar_warn_saida)
 
     def confirmar(foco_busca: bool = False):
-        # 🚫 trava Enter / Ctrl+Enter se o botão estiver desabilitado
         try:
             if "disabled" in btn_confirmar.state():
-                # mantém padrão visual (âmbar) e mensagem fixa curta
                 lbl_status.configure(foreground=CORES.get("warn", "#b26a00"))
                 status_var.set("⚠ Corrija a quantidade (está maior que o estoque atual).")
                 ent_qtd.focus_set()
@@ -636,10 +686,8 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
             ms=2000,
         )
 
-
         qtd_var.set("")
 
-        # Atualiza preview (estoque mudou) sem mexer no core: recarrega produtos do core
         novos = carregar_produtos()
         for pp in novos:
             try:
@@ -656,22 +704,19 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
         else:
             ent_qtd.focus_set()
 
-    btn_confirmar = ttk.Button(frame, text="Confirmar", command=lambda: confirmar(False))
+    btn_confirmar = ttk.Button(frame, text="Confirmar", command=lambda: confirmar(False), takefocus=False)
     btn_confirmar.pack(anchor="e")
 
-
-    # Enter confirma
     ent_qtd.bind("<Return>", lambda e: confirmar(False))
-    # Ctrl+Enter confirma e volta para busca
     win.bind("<Control-Return>", lambda e: (confirmar(True), "break"))
-    # Esc na quantidade: limpa e volta para busca
+
     def _esc_qtd(event=None):
         qtd_var.set("")
         ent_busca.focus_set()
         _avaliar_warn_saida()
         return "break"
-    ent_qtd.bind("<Escape>", _esc_qtd)
 
+    ent_qtd.bind("<Escape>", _esc_qtd)
 
 
 def abrir_abaixo_minimo(root: tk.Tk) -> None:
@@ -685,13 +730,13 @@ def abrir_abaixo_minimo(root: tk.Tk) -> None:
     win = tk.Toplevel(root)
     win.title("Abaixo do mínimo")
     win.geometry("720x420")
+    _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
 
     ttk.Label(frame, text="Itens abaixo do estoque mínimo", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
 
-    # feedback discreto (sem popup)
     status_var = tk.StringVar(value="")
     lbl = ttk.Label(frame, textvariable=status_var, foreground="green")
     lbl.pack(anchor="w", pady=(0, 8))
@@ -742,8 +787,10 @@ def abrir_historico(root: tk.Tk) -> None:
 
     win = tk.Toplevel(root)
     win.title("Histórico de movimentações")
-    win.geometry("900x620")
-    win.minsize(820, 560)
+    _configurar_fechamento_toplevel(win, root)
+
+    win.state("zoomed")  # tela cheia no Windows
+    win.minsize(1020, 720)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -763,7 +810,6 @@ def abrir_historico(root: tk.Tk) -> None:
     ent_limite = ttk.Entry(filtros, textvariable=limite_var, width=8)
     ent_limite.pack(side="left", padx=(8, 16))
 
-    # feedback discreto
     ok_var = tk.StringVar(value="")
     ttk.Label(filtros, textvariable=ok_var, foreground="green").pack(side="right")
 
@@ -842,7 +888,7 @@ def abrir_historico(root: tk.Tk) -> None:
         nonlocal movimentos_cache
         limite = _parse_limite()
         movimentos = listar_movimentos(limite=limite)
-        movimentos_cache = list(reversed(movimentos))  # mais recentes primeiro
+        movimentos_cache = list(reversed(movimentos))
         aplicar_filtro()
 
     def aplicar_filtro():
@@ -859,7 +905,8 @@ def abrir_historico(root: tk.Tk) -> None:
                 continue
 
             delta = float(m.get("delta", 0))
-            ts = str(m.get("ts", ""))
+            dt = _parse_iso_ts(m.get("ts", ""))
+            ts = _fmt_dt_br(dt)
 
             tree.insert(
                 "", "end",
@@ -881,7 +928,6 @@ def abrir_historico(root: tk.Tk) -> None:
         aplicar_filtro()
 
     def exportar_csv():
-        from datetime import datetime
         nome_sugerido = f"historico_estoque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         caminho = filedialog.asksaveasfilename(
@@ -909,7 +955,6 @@ def abrir_historico(root: tk.Tk) -> None:
             messagebox.showerror("Erro", f"Não foi possível exportar o CSV.\n\n{e}")
 
     def exportar_excel():
-        from datetime import datetime
         nome_sugerido = f"historico_estoque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
         caminho = filedialog.asksaveasfilename(
@@ -939,16 +984,956 @@ def abrir_historico(root: tk.Tk) -> None:
     botoes = ttk.Frame(frame)
     botoes.pack(fill="x", pady=(10, 0))
 
-    ttk.Button(botoes, text="Atualizar", command=carregar).pack(side="right")
-    ttk.Button(botoes, text="Exportar Excel", command=exportar_excel).pack(side="right", padx=(0, 8))
-    ttk.Button(botoes, text="Exportar CSV", command=exportar_csv).pack(side="right", padx=(0, 8))
-    ttk.Button(botoes, text="Limpar filtro", command=limpar_filtro).pack(side="right", padx=(0, 8))
+    ttk.Button(botoes, text="Atualizar", command=carregar, takefocus=False).pack(side="right")
+    ttk.Button(botoes, text="Exportar Excel", command=exportar_excel, takefocus=False).pack(side="right", padx=(0, 8))
+    ttk.Button(botoes, text="Exportar CSV", command=exportar_csv, takefocus=False).pack(side="right", padx=(0, 8))
+    ttk.Button(botoes, text="Limpar filtro", command=limpar_filtro, takefocus=False).pack(side="right", padx=(0, 8))
 
     ent_filtro.bind("<Return>", lambda e: aplicar_filtro())
     ent_filtro.bind("<Escape>", lambda e: limpar_filtro())
 
     carregar()
     ent_filtro.focus_set()
+
+
+# ============================================================
+# 1) DASHBOARD - VISÃO GERAL
+# ============================================================
+def abrir_dashboard(root: tk.Tk) -> None:
+    win = tk.Toplevel(root)
+    win.title("Visão Geral")
+    win.state("zoomed")   # tela cheia no Windows
+    win.minsize(1180, 640)
+    _configurar_fechamento_toplevel(win, root)
+
+    frame = ttk.Frame(win, padding=12)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text="Visão Geral", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 10))
+
+    # Cards simples (sem refatorar, só frames)
+    top = ttk.Frame(frame)
+    top.pack(fill="x")
+
+    card_a = ttk.Frame(top, padding=12)
+    card_b = ttk.Frame(top, padding=12)
+    card_c = ttk.Frame(top, padding=12)
+    card_a.pack(side="left", fill="x", expand=True, padx=(0, 8))
+    card_b.pack(side="left", fill="x", expand=True, padx=(0, 8))
+    card_c.pack(side="left", fill="x", expand=True)
+
+    total_var = tk.StringVar(value="0")
+    abaixo_var = tk.StringVar(value="0")
+    alertas_var = tk.StringVar(value="0")
+
+    ttk.Label(card_a, text="Itens cadastrados", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+    ttk.Label(card_a, textvariable=total_var, font=("Segoe UI", 20, "bold")).pack(anchor="w")
+
+    ttk.Label(card_b, text="Abaixo do mínimo", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+    ttk.Label(card_b, textvariable=abaixo_var, font=("Segoe UI", 20, "bold")).pack(anchor="w")
+
+    ttk.Label(card_c, text="Alertas (zerados / quase)", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+    ttk.Label(card_c, textvariable=alertas_var, font=("Segoe UI", 20, "bold")).pack(anchor="w")
+
+    mid = ttk.Frame(frame)
+    mid.pack(fill="both", expand=True, pady=(12, 0))
+
+    # Top 5 cobertura
+    left = ttk.Frame(mid)
+    left.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+    ttk.Label(left, text="Top 5 menor cobertura (atual / mínimo)", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+
+    cols_cov = ("nome", "un", "atual", "min", "cob")
+    tree_cov = ttk.Treeview(left, columns=cols_cov, show="headings", height=10)
+    tree_cov.pack(side="top", fill="both", expand=True)
+
+    xscroll_cov = ttk.Scrollbar(left, orient="horizontal", command=tree_cov.xview)
+    xscroll_cov.pack(side="bottom", fill="x")
+    tree_cov.configure(xscrollcommand=xscroll_cov.set)
+
+    tree_cov.heading("nome", text="Item")
+    tree_cov.heading("un", text="Unid.")
+    tree_cov.heading("atual", text="Atual")
+    tree_cov.heading("min", text="Mínimo")
+    tree_cov.heading("cob", text="Cobertura")
+
+    tree_cov.column("nome", width=320)
+    tree_cov.column("un", width=70, anchor="center")
+    tree_cov.column("atual", width=80, anchor="center")
+    tree_cov.column("min", width=80, anchor="center")
+    tree_cov.column("cob", width=90, anchor="center")
+
+    # Últimas 10 movimentações
+    right = ttk.Frame(mid)
+    right.pack(side="left", fill="both", expand=True)
+
+    ttk.Label(right, text="Últimas 10 movimentações", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+
+    cols_mov = ("ts", "nome", "tipo", "qtd")
+    tree_mov = ttk.Treeview(right, columns=cols_mov, show="headings", height=10)
+    tree_mov.pack(side="top", fill="both", expand=True)
+
+    xscroll_mov = ttk.Scrollbar(right, orient="horizontal", command=tree_mov.xview)
+    xscroll_mov.pack(side="bottom", fill="x")
+    tree_mov.configure(xscrollcommand=xscroll_mov.set)
+
+    tree_mov.heading("ts", text="Data/Hora")
+    tree_mov.heading("nome", text="Item")
+    tree_mov.heading("tipo", text="Tipo")
+    tree_mov.heading("qtd", text="Qtd")
+
+    tree_mov.column("ts", width=140, anchor="center")
+    tree_mov.column("nome", width=320)
+    tree_mov.column("tipo", width=70, anchor="center")
+    tree_mov.column("qtd", width=70, anchor="center")
+
+    status_var = tk.StringVar(value="")
+    ttk.Label(frame, textvariable=status_var).pack(anchor="w", pady=(10, 0))
+
+    def atualizar():
+        produtos = carregar_produtos()
+        total = len(produtos)
+
+        abaixo = 0
+        alertas = 0
+
+        cov_list = []
+        for p in produtos:
+            atual = _safe_float(p.get("estoque_atual", 0), 0.0)
+            minimo = _safe_float(p.get("estoque_minimo", 0), 0.0)
+            if atual < minimo:
+                abaixo += 1
+
+            # alertas: zerado ou "quase" (<= minimo)
+            if atual <= 0:
+                alertas += 1
+            elif minimo > 0 and atual <= minimo:
+                alertas += 1
+
+            # cobertura
+            if minimo <= 0:
+                cobertura = float("inf")  # sem mínimo definido, não entra no top ruim
+            else:
+                cobertura = atual / minimo
+
+            cov_list.append((cobertura, p))
+
+        total_var.set(str(total))
+        abaixo_var.set(str(abaixo))
+        alertas_var.set(str(alertas))
+
+        # Top 5 menor cobertura (ignorando inf)
+        tree_cov.delete(*tree_cov.get_children())
+        cov_list = [x for x in cov_list if x[0] != float("inf")]
+        cov_list.sort(key=lambda x: x[0])
+        for cobertura, p in cov_list[:5]:
+            un = str(p.get("unidade", "")).strip()
+            atual = _safe_float(p.get("estoque_atual", 0), 0.0)
+            minimo = _safe_float(p.get("estoque_minimo", 0), 0.0)
+            tree_cov.insert(
+                "", "end",
+                values=(p.get("nome", ""), un, atual, minimo, f"{cobertura:.2f}x"),
+            )
+
+        # Últimas 10 movimentações
+        tree_mov.delete(*tree_mov.get_children())
+        movs = listar_movimentos(limite=10)
+        movs = list(reversed(movs))  # mais recentes primeiro
+        for m in movs:
+            dt = _parse_iso_ts(m.get("ts", ""))
+            nome = str(m.get("nome", ""))
+            delta = _safe_float(m.get("delta", 0), 0.0)
+            tipo = "Entrada" if delta > 0 else "Saída"
+            qtd = abs(delta)
+            tree_mov.insert("", "end", values=(_fmt_dt_br(dt), nome, tipo, qtd))
+
+        status_var.set(f"Atualizado em {_fmt_dt_br(datetime.now())}")
+
+    botoes = ttk.Frame(frame)
+    botoes.pack(fill="x", pady=(10, 0))
+    ttk.Button(botoes, text="Atualizar", command=atualizar, takefocus=False).pack(side="right")
+
+    atualizar()
+
+
+# ============================================================
+# 2) RELATÓRIOS POR PERÍODO
+# ============================================================
+def abrir_relatorios_periodo(root: tk.Tk) -> None:
+    win = tk.Toplevel(root)
+    win.title("Relatórios por período")
+    win.state("zoomed")  # tela cheia no Windows
+    win.minsize(1150, 720)
+    _configurar_fechamento_toplevel(win, root)
+
+    frame = ttk.Frame(win, padding=12)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text="Relatórios por período", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 10))
+
+    filtros = ttk.Frame(frame)
+    filtros.pack(fill="x", pady=(0, 10))
+
+    ttk.Label(filtros, text="De (YYYY-MM-DD)").pack(side="left")
+    de_var = tk.StringVar(value="")
+    ent_de = ttk.Entry(filtros, textvariable=de_var, width=12)
+    ent_de.pack(side="left", padx=(6, 12))
+
+    ttk.Label(filtros, text="Até (YYYY-MM-DD)").pack(side="left")
+    ate_var = tk.StringVar(value="")
+    ent_ate = ttk.Entry(filtros, textvariable=ate_var, width=12)
+    ent_ate.pack(side="left", padx=(6, 12))
+
+    # atalhos rápidos
+    def _set_periodo(dias: int):
+        hoje = date.today()
+        ini = hoje - timedelta(days=dias)
+        de_var.set(ini.isoformat())
+        ate_var.set(hoje.isoformat())
+
+    ttk.Button(filtros, text="7 dias", command=lambda: _set_periodo(7), takefocus=False).pack(side="left", padx=(0, 6))
+    ttk.Button(filtros, text="30 dias", command=lambda: _set_periodo(30), takefocus=False).pack(side="left", padx=(0, 6))
+    ttk.Button(filtros, text="90 dias", command=lambda: _set_periodo(90), takefocus=False).pack(side="left", padx=(0, 12))
+
+    status_var = tk.StringVar(value="")
+    ttk.Label(filtros, textvariable=status_var).pack(side="right")
+
+    # tabelas
+    mid = ttk.Frame(frame)
+    mid.pack(fill="both", expand=True)
+
+    left = ttk.Frame(mid)
+    left.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+    ttk.Label(left, text="Totais por item (Entradas / Saídas)", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+    cols = ("nome", "entradas", "saidas", "saldo")
+    tree = ttk.Treeview(left, columns=cols, show="headings", height=18)
+    tree.pack(fill="both", expand=True)
+
+    tree.heading("nome", text="Item")
+    tree.heading("entradas", text="Entradas")
+    tree.heading("saidas", text="Saídas")
+    tree.heading("saldo", text="Saldo")
+
+    tree.column("nome", width=320)
+    tree.column("entradas", width=90, anchor="center")
+    tree.column("saidas", width=90, anchor="center")
+    tree.column("saldo", width=90, anchor="center")
+
+    right = ttk.Frame(mid)
+    right.pack(side="left", fill="both", expand=True)
+
+    ttk.Label(right, text="Itens mais movimentados (volume)", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+    cols2 = ("nome", "volume")
+    tree2 = ttk.Treeview(right, columns=cols2, show="headings", height=18)
+    tree2.pack(fill="both", expand=True)
+
+    tree2.heading("nome", text="Item")
+    tree2.heading("volume", text="Volume")
+
+    tree2.column("nome", width=320)
+    tree2.column("volume", width=100, anchor="center")
+
+    cache_relatorio = {
+        "periodo": ("", ""),
+        "linhas": [],  # list of dict
+    }
+
+    def _parse_data(txt: str) -> date | None:
+        txt = (txt or "").strip()
+        if not txt:
+            return None
+        try:
+            return date.fromisoformat(txt)
+        except Exception:
+            return None
+
+    def gerar():
+        d1 = _parse_data(de_var.get())
+        d2 = _parse_data(ate_var.get())
+
+        if d1 is None or d2 is None:
+            status_var.set("Preencha datas válidas (YYYY-MM-DD).")
+            return
+        if d2 < d1:
+            status_var.set("Período inválido: 'Até' menor que 'De'.")
+            return
+
+        movs = listar_movimentos(limite=None)
+
+        # filtra por período (inclui dia inteiro)
+        ini_dt = datetime(d1.year, d1.month, d1.day, 0, 0, 0)
+        fim_dt = datetime(d2.year, d2.month, d2.day, 23, 59, 59)
+
+        por_item = {}  # nome -> {entradas, saidas, saldo, volume}
+        for m in movs:
+            dt = _parse_iso_ts(m.get("ts", ""))
+            if not dt:
+                continue
+            if dt < ini_dt or dt > fim_dt:
+                continue
+
+            nome = str(m.get("nome", ""))
+            delta = _safe_float(m.get("delta", 0), 0.0)
+
+            if nome not in por_item:
+                por_item[nome] = {"nome": nome, "entradas": 0.0, "saidas": 0.0, "saldo": 0.0, "volume": 0.0}
+
+            if delta > 0:
+                por_item[nome]["entradas"] += delta
+            else:
+                por_item[nome]["saidas"] += abs(delta)
+
+            por_item[nome]["saldo"] += delta
+            por_item[nome]["volume"] += abs(delta)
+
+        linhas = list(por_item.values())
+        linhas.sort(key=lambda x: x["nome"].lower())
+
+        tree.delete(*tree.get_children())
+        for r in linhas:
+            tree.insert("", "end", values=(r["nome"], round(r["entradas"], 3), round(r["saidas"], 3), round(r["saldo"], 3)))
+
+        # top movimentados
+        top = sorted(linhas, key=lambda x: x["volume"], reverse=True)
+        tree2.delete(*tree2.get_children())
+        for r in top[:20]:
+            tree2.insert("", "end", values=(r["nome"], round(r["volume"], 3)))
+
+        cache_relatorio["periodo"] = (d1.isoformat(), d2.isoformat())
+        cache_relatorio["linhas"] = linhas
+        status_var.set(f"{len(linhas)} item(ns) no período")
+
+    def exportar_relatorio_csv():
+        linhas = cache_relatorio.get("linhas", [])
+        if not linhas:
+            messagebox.showwarning("Atenção", "Gere o relatório antes de exportar.")
+            return
+
+        de_, ate_ = cache_relatorio.get("periodo", ("", ""))
+        nome_sugerido = f"relatorio_{de_}_a_{ate_}.csv".replace("-", "")
+
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar relatório em CSV",
+            defaultextension=".csv",
+            initialfile=nome_sugerido,
+            filetypes=[("CSV", "*.csv")],
+        )
+        if not caminho:
+            return
+
+        try:
+            with open(caminho, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["item", "entradas", "saidas", "saldo", "volume"])
+                for r in linhas:
+                    w.writerow([r["nome"], r["entradas"], r["saidas"], r["saldo"], r["volume"]])
+            messagebox.showinfo("OK", "Relatório CSV exportado.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao exportar CSV:\n\n{e}")
+
+    def exportar_relatorio_excel():
+        linhas = cache_relatorio.get("linhas", [])
+        if not linhas:
+            messagebox.showwarning("Atenção", "Gere o relatório antes de exportar.")
+            return
+
+        de_, ate_ = cache_relatorio.get("periodo", ("", ""))
+        nome_sugerido = f"relatorio_{de_}_a_{ate_}.xlsx".replace("-", "")
+
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar relatório em Excel",
+            defaultextension=".xlsx",
+            initialfile=nome_sugerido,
+            filetypes=[("Excel", "*.xlsx")],
+        )
+        if not caminho:
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Relatório"
+
+            header = ["Item", "Entradas", "Saídas", "Saldo", "Volume"]
+            ws.append(header)
+
+            header_font = Font(bold=True)
+            header_fill = PatternFill("solid", fgColor="DDDDDD")
+            header_align = Alignment(horizontal="center")
+
+            for col in range(1, len(header) + 1):
+                c = ws.cell(row=1, column=col)
+                c.font = header_font
+                c.fill = header_fill
+                c.alignment = header_align
+
+            for r in linhas:
+                ws.append([r["nome"], r["entradas"], r["saidas"], r["saldo"], r["volume"]])
+
+            # largura
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.value is not None:
+                        max_len = max(max_len, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = min(max_len + 2, 45)
+
+            wb.save(caminho)
+            messagebox.showinfo("OK", "Relatório Excel exportado.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao exportar Excel:\n\n{e}")
+
+    botoes = ttk.Frame(frame)
+    botoes.pack(fill="x", pady=(10, 0))
+
+    ttk.Button(botoes, text="Gerar", command=gerar, takefocus=False).pack(side="right")
+    ttk.Button(botoes, text="Exportar Excel", command=exportar_relatorio_excel, takefocus=False).pack(side="right", padx=(0, 8))
+    ttk.Button(botoes, text="Exportar CSV", command=exportar_relatorio_csv, takefocus=False).pack(side="right", padx=(0, 8))
+
+    # padrão: últimos 30 dias
+    hoje = date.today()
+    de_var.set((hoje - timedelta(days=30)).isoformat())
+    ate_var.set(hoje.isoformat())
+    gerar()
+
+
+# ============================================================
+# 3) AJUSTE DE ESTOQUE (motivo obrigatório na UI)
+# ============================================================
+def abrir_ajuste_estoque(root: tk.Tk) -> None:
+    produtos = carregar_produtos()
+    produtos = sorted(produtos, key=lambda p: str(p.get("nome", "")).lower())
+    if not produtos:
+        messagebox.showinfo("Sem itens", "Cadastre um item antes.")
+        return
+
+    # mapa id -> produto
+    id_para_produto = {}
+    for p in produtos:
+        try:
+            id_para_produto[int(p.get("id", 0))] = p
+        except Exception:
+            pass
+
+    win = tk.Toplevel(root)
+    win.title("Ajuste de estoque")
+    win.geometry("620x520")
+    win.minsize(620, 520)
+    _configurar_fechamento_toplevel(win, root)
+
+    frame = ttk.Frame(win, padding=12)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text="Ajuste de estoque", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+    ttk.Label(frame, text="Use para corrigir o estoque com motivo.").pack(anchor="w", pady=(0, 10))
+
+    # seleção item (reaproveita busca premium)
+    ttk.Label(frame, text="Buscar item").pack(anchor="w")
+    busca_var = tk.StringVar(value="")
+    ent_busca = ttk.Entry(frame, textvariable=busca_var)
+    ent_busca.pack(fill="x", pady=(0, 6))
+
+    itens_exibicao = []
+    texto_para_id = {}
+    item_para_nome_norm = {}
+    item_para_tokens = {}
+    usados = {}
+
+    for p in produtos:
+        nome = str(p.get("nome", "")).strip()
+        unidade = str(p.get("unidade", "")).strip()
+        pid = int(p.get("id", 0))
+
+        base = nome
+        if base in usados:
+            base = f"{nome} ({unidade})" if unidade else nome
+        n = usados.get(base, 0) + 1
+        usados[base] = n
+        texto_exibido = base if n == 1 else f"{base} ({n})"
+
+        itens_exibicao.append(texto_exibido)
+        texto_para_id[texto_exibido] = pid
+
+        nn = normalizar_busca(nome)
+        item_para_nome_norm[texto_exibido] = nn
+        item_para_tokens[texto_exibido] = nn.split() if nn else []
+
+    itens_originais = itens_exibicao.copy()
+
+    list_frame = ttk.Frame(frame)
+    list_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+    yscroll = ttk.Scrollbar(list_frame, orient="vertical")
+    yscroll.pack(side="right", fill="y")
+
+    lb = tk.Listbox(
+        list_frame,
+        height=10,
+        activestyle="none",
+        exportselection=False,
+        yscrollcommand=yscroll.set,
+        bg="#ffffff",
+        fg="#1f2933",
+        selectbackground="#2563eb",
+        selectforeground="#ffffff",
+        highlightthickness=1,
+        highlightbackground="#d1d5db",
+        relief="flat",
+        borderwidth=0,
+    )
+    lb.pack(side="left", fill="both", expand=True)
+    yscroll.config(command=lb.yview)
+
+    for it in itens_originais:
+        lb.insert("end", it)
+
+    preview_var = tk.StringVar(value="Selecione um item para ver o estoque atual.")
+    ttk.Label(frame, textvariable=preview_var).pack(anchor="w", pady=(0, 10))
+
+    def obter_item() -> str | None:
+        sel = lb.curselection()
+        if not sel:
+            return None
+        try:
+            return lb.get(int(sel[0]))
+        except Exception:
+            return None
+
+    def atualizar_preview():
+        item = obter_item()
+        if not item:
+            preview_var.set("Selecione um item para ver o estoque atual.")
+            return
+        pid = texto_para_id.get(item)
+        p = id_para_produto.get(int(pid), {})
+        un = str(p.get("unidade", "")).strip()
+        atual = _safe_float(p.get("estoque_atual", 0), 0.0)
+        minimo = _safe_float(p.get("estoque_minimo", 0), 0.0)
+        sufixo = f" {un}" if un else ""
+        preview_var.set(f"Estoque atual: {atual}{sufixo}  |  Mínimo: {minimo}{sufixo}")
+
+    def filtrar():
+        q = normalizar_busca(busca_var.get())
+        if not q:
+            itens = itens_originais
+        else:
+            qtoks = q.split()
+            a, b, c, d = [], [], [], []
+            for item_txt in itens_originais:
+                nome_norm = item_para_nome_norm.get(item_txt, "")
+                ntoks = item_para_tokens.get(item_txt, [])
+                if nome_norm.startswith(q):
+                    a.append(item_txt)
+                elif match_prefix_por_palavras(qtoks, ntoks):
+                    b.append(item_txt)
+                elif q in nome_norm:
+                    c.append(item_txt)
+                elif match_tokens_em_ordem(qtoks, ntoks):
+                    d.append(item_txt)
+            itens = a + b + c + d
+
+        lb.delete(0, "end")
+        for it in itens:
+            lb.insert("end", it)
+
+        if len(itens) == 1:
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.see(0)
+            atualizar_preview()
+
+    _after = None
+    def on_key(event=None):
+        nonlocal _after
+        if _after is not None:
+            try:
+                win.after_cancel(_after)
+            except Exception:
+                pass
+        _after = win.after(120, filtrar)
+
+    ent_busca.bind("<KeyRelease>", on_key)
+    lb.bind("<<ListboxSelect>>", lambda e: atualizar_preview())
+
+    # motivo
+    ttk.Label(frame, text="Motivo do ajuste (obrigatório)").pack(anchor="w")
+    motivo_var = tk.StringVar(value="")
+    motivos = ["Contagem", "Quebra", "Vencimento", "Doação externa", "Erro de lançamento", "Outro"]
+    cb = ttk.Combobox(frame, values=motivos, textvariable=motivo_var, state="readonly")
+    cb.pack(fill="x", pady=(0, 10))
+
+    # delta
+    ttk.Label(frame, text="Quantidade do ajuste (use negativo para reduzir, ex: -2)").pack(anchor="w")
+    qtd_var = tk.StringVar(value="")
+    ent_qtd = ttk.Entry(frame, textvariable=qtd_var)
+    ent_qtd.pack(fill="x", pady=(0, 10))
+
+    status_var = tk.StringVar(value="")
+    lbl_status = ttk.Label(frame, textvariable=status_var)
+    lbl_status.pack(anchor="w", pady=(0, 8))
+
+    def aplicar():
+        item = obter_item()
+        if not item:
+            status_var.set("Selecione um item.")
+            return
+        pid = texto_para_id.get(item)
+        if not pid:
+            status_var.set("Não foi possível identificar o item.")
+            return
+
+        mot = motivo_var.get().strip()
+        if not mot:
+            status_var.set("Selecione um motivo.")
+            cb.focus_set()
+            return
+
+        txt = qtd_var.get().strip().replace(",", ".")
+        try:
+            delta = float(txt)
+            if delta == 0:
+                raise ValueError()
+        except Exception:
+            status_var.set("Quantidade inválida. Use um número diferente de 0.")
+            ent_qtd.focus_set()
+            return
+
+        try:
+            atualizar_estoque(int(pid), float(delta), motivo=mot)
+        except ValueError as e:
+            messagebox.showerror("Erro", str(e))
+            ent_qtd.focus_set()
+            return
+
+        # recarrega produtos pra preview bater
+        novos = carregar_produtos()
+        for pp in novos:
+            try:
+                id_para_produto[int(pp.get("id", 0))] = pp
+            except Exception:
+                pass
+
+        atualizar_preview()
+        status_var.set(f"Ajuste aplicado ({mot}).")
+        qtd_var.set("")
+        ent_qtd.focus_set()
+
+    ttk.Button(frame, text="Aplicar ajuste", command=aplicar, takefocus=False).pack(anchor="e")
+
+
+# ============================================================
+# 4) INVENTÁRIO / CONTAGEM GUIADA
+# ============================================================
+def abrir_inventario_contagem(root: tk.Tk) -> None:
+    produtos = carregar_produtos()
+    produtos = sorted(produtos, key=lambda p: str(p.get("nome", "")).lower())
+    if not produtos:
+        messagebox.showinfo("Sem itens", "Cadastre um item antes.")
+        return
+
+    win = tk.Toplevel(root)
+    win.title("Inventário / Contagem")
+    win.state("zoomed")  # tela cheia no Windows
+    win.minsize(1100, 720)
+    _configurar_fechamento_toplevel(win, root)
+
+    frame = ttk.Frame(win, padding=12)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text="Inventário / Contagem guiada", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+    ttk.Label(frame, text="Digite o 'Contado' e aplique para ajustar o estoque ao valor real.").pack(anchor="w", pady=(0, 10))
+
+    topo = ttk.Frame(frame)
+    topo.pack(fill="x", pady=(0, 10))
+
+    ttk.Label(topo, text="Filtrar item").pack(side="left")
+    filtro_var = tk.StringVar(value="")
+    ent_filtro = ttk.Entry(topo, textvariable=filtro_var, width=30)
+    ent_filtro.pack(side="left", padx=(8, 16))
+
+    status_var = tk.StringVar(value="")
+    ttk.Label(topo, textvariable=status_var).pack(side="right")
+
+    cols = ("id", "nome", "un", "atual", "contado", "diff")
+    tree = ttk.Treeview(frame, columns=cols, show="headings", height=18)
+    tree.pack(fill="both", expand=True)
+
+    tree.heading("id", text="ID")
+    tree.heading("nome", text="Item")
+    tree.heading("un", text="Unid.")
+    tree.heading("atual", text="Atual")
+    tree.heading("contado", text="Contado")
+    tree.heading("diff", text="Diferença")
+
+    tree.column("id", width=60, anchor="center")
+    tree.column("nome", width=380)
+    tree.column("un", width=70, anchor="center")
+    tree.column("atual", width=90, anchor="center")
+    tree.column("contado", width=90, anchor="center")
+    tree.column("diff", width=90, anchor="center")
+
+    # Editor visível (mais óbvio que dá pra digitar o "Contado")
+    editor_frame = ttk.Frame(frame)
+    editor_frame.pack(fill="x", pady=(8, 0))
+
+    selecionado_var = tk.StringVar(value="Selecione um item na tabela para informar o contado.")
+    ttk.Label(editor_frame, textvariable=selecionado_var).pack(side="left")
+
+    ttk.Label(editor_frame, text="Contado").pack(side="left", padx=(16, 6))
+    contado_var = tk.StringVar(value="")
+    ent_contado = ttk.Entry(editor_frame, textvariable=contado_var, width=12)
+    ent_contado.pack(side="left")
+
+    def _aplicar_contado_selecionado():
+        sel = tree.selection()
+        if not sel:
+            status_var.set("Selecione um item na tabela.")
+            return
+        iid = sel[0]
+        txt = contado_var.get().strip().replace(",", ".")
+        try:
+            v = float(txt)
+            if v < 0:
+                raise ValueError()
+        except Exception:
+            status_var.set("Contado inválido. Use um número >= 0 (ex: 10 ou 10,5).")
+            ent_contado.focus_set()
+            return
+
+        r = linhas.get(iid)
+        if not r:
+            status_var.set("Item selecionado inválido.")
+            return
+
+        r["contado"] = float(v)
+        atual = float(r.get("atual", 0.0))
+        diff = float(v) - atual
+        tree.set(iid, "contado", float(v))
+        tree.set(iid, "diff", diff)
+
+        status_var.set("Contado atualizado na tabela. Clique em 'Aplicar ajustes' para gravar no estoque.")
+        try:
+            ent_contado.selection_range(0, "end")
+            ent_contado.focus_set()
+        except Exception:
+            pass
+
+    ttk.Button(editor_frame, text="Aplicar no selecionado", command=_aplicar_contado_selecionado, takefocus=False).pack(side="left", padx=(8, 0))
+
+    def _on_select_row(_e=None):
+        sel = tree.selection()
+        if not sel:
+            selecionado_var.set("Selecione um item na tabela para informar o contado.")
+            return
+        iid = sel[0]
+        r = linhas.get(iid, {})
+        nome = r.get("nome", "")
+        atual = r.get("atual", "")
+        selecionado_var.set(f"Selecionado: {nome} | Atual: {atual}")
+        # prepara campo
+        cv = r.get("contado")
+        contado_var.set("" if cv is None else str(cv))
+
+    tree.bind("<<TreeviewSelect>>", _on_select_row)
+
+
+    # cache: iid -> dict com valores
+    linhas: dict[str, dict] = {}
+
+    def render():
+        tree.delete(*tree.get_children())
+        linhas.clear()
+
+        termo = normalizar_busca(filtro_var.get().strip())
+        count = 0
+
+        for p in produtos:
+            nome = str(p.get("nome", ""))
+            if termo and termo not in normalizar_busca(nome):
+                continue
+
+            pid = int(p.get("id", 0))
+            un = str(p.get("unidade", "")).strip()
+            atual = _safe_float(p.get("estoque_atual", 0), 0.0)
+            contado = ""  # vazio inicialmente
+            diff = ""
+
+            iid = tree.insert("", "end", values=(pid, nome, un, atual, contado, diff))
+            linhas[iid] = {"id": pid, "nome": nome, "un": un, "atual": atual, "contado": None}
+            count += 1
+
+        status_var.set(f"{count} item(ns)")
+
+    def _recalc(iid: str):
+        r = linhas.get(iid)
+        if not r:
+            return
+        atual = float(r.get("atual", 0.0))
+        contado = r.get("contado")
+        if contado is None:
+            tree.set(iid, "diff", "")
+            return
+        try:
+            diff = float(contado) - atual
+        except Exception:
+            tree.set(iid, "diff", "")
+            return
+        tree.set(iid, "diff", round(diff, 3))
+
+    # editor simples de célula (contado)
+    editor = {"w": None, "iid": None}
+
+    def _close_editor():
+        w = editor.get("w")
+        if w is not None:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        editor["w"] = None
+        editor["iid"] = None
+
+    def _start_edit(event=None):
+        # só edita coluna "contado"
+        region = tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        col = tree.identify_column(event.x)  # "#1"...
+        if col != "#5":  # 5a coluna = contado
+            return
+
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+
+        bbox = tree.bbox(iid, "contado")
+        if not bbox:
+            return
+
+        x, y, w, h = bbox
+        value = tree.set(iid, "contado")
+
+        _close_editor()
+
+        e = ttk.Entry(tree)
+        e.place(x=x, y=y, width=w, height=h)
+        e.insert(0, value)
+        e.focus_set()
+
+        editor["w"] = e
+        editor["iid"] = iid
+
+        def _commit(_evt=None):
+            txt = e.get().strip().replace(",", ".")
+            if txt == "":
+                tree.set(iid, "contado", "")
+                linhas[iid]["contado"] = None
+                _recalc(iid)
+                _close_editor()
+                return "break"
+
+            try:
+                val = float(txt)
+                if val < 0:
+                    raise ValueError()
+            except Exception:
+                # não trava app: só não aplica
+                tree.set(iid, "contado", "")
+                linhas[iid]["contado"] = None
+                _recalc(iid)
+                _close_editor()
+                return "break"
+
+            tree.set(iid, "contado", str(val))
+            linhas[iid]["contado"] = float(val)
+            _recalc(iid)
+            _close_editor()
+            return "break"
+
+        e.bind("<Return>", _commit)
+        e.bind("<Escape>", lambda _e: (_close_editor(), "break"))
+        e.bind("<FocusOut>", _commit)
+
+    tree.bind("<Double-Button-1>", _start_edit)
+
+    def aplicar_ajustes():
+        # motivo fixo (UI): "Contagem"
+        # (motivo não é gravado no histórico do core ainda)
+        ajustes = []
+        for iid, r in linhas.items():
+            contado = r.get("contado")
+            if contado is None:
+                continue
+            atual = float(r.get("atual", 0.0))
+            delta = float(contado) - atual
+            if abs(delta) < 1e-9:
+                continue
+            ajustes.append((r["id"], delta))
+
+        if not ajustes:
+            messagebox.showinfo("OK", "Nada para ajustar.")
+            return
+
+        # aplica em lote
+        erros = 0
+        for pid, delta in ajustes:
+            try:
+                atualizar_estoque(int(pid), float(delta), motivo=mot)
+            except Exception:
+                erros += 1
+
+        # recarrega produtos e re-renderiza
+        nonlocal_prod = carregar_produtos()
+        nonlocal_prod = sorted(nonlocal_prod, key=lambda p: str(p.get("nome", "")).lower())
+        produtos[:] = nonlocal_prod  # mantém referência
+        render()
+
+        if erros:
+            messagebox.showwarning("Concluído", f"Ajustes aplicados com {erros} erro(s).")
+        else:
+            messagebox.showinfo("Concluído", f"Ajustes aplicados: {len(ajustes)}")
+
+    def exportar_lista_contagem():
+        # exporta lista com Atual e campo Contado vazio (para imprimir/usar fora)
+        nome_sugerido = f"lista_contagem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar lista de contagem (CSV)",
+            defaultextension=".csv",
+            initialfile=nome_sugerido,
+            filetypes=[("CSV", "*.csv")],
+        )
+        if not caminho:
+            return
+
+        try:
+            termo = normalizar_busca(filtro_var.get().strip())
+            with open(caminho, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["id", "item", "unidade", "estoque_atual", "contado"])
+                for p in produtos:
+                    nome = str(p.get("nome", ""))
+                    if termo and termo not in normalizar_busca(nome):
+                        continue
+                    w.writerow([p.get("id", ""), nome, p.get("unidade", ""), p.get("estoque_atual", 0), ""])
+            messagebox.showinfo("OK", "Lista de contagem exportada.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao exportar:\n\n{e}")
+
+    botoes = ttk.Frame(frame)
+    botoes.pack(fill="x", pady=(10, 0))
+
+    ttk.Button(botoes, text="Exportar lista (CSV)", command=exportar_lista_contagem, takefocus=False).pack(side="left")
+    ttk.Button(botoes, text="Aplicar ajustes", command=aplicar_ajustes, takefocus=False).pack(side="right")
+
+    ent_filtro.bind("<KeyRelease>", lambda e: render())
+    render()
 
 
 def ajustar_janela_ao_conteudo_e_centralizar(root: tk.Tk, margem: int = 24) -> None:
@@ -965,8 +1950,125 @@ def ajustar_janela_ao_conteudo_e_centralizar(root: tk.Tk, margem: int = 24) -> N
     root.minsize(w, h)
 
 
+
+# =========================
+# UX: "Hubs" para reduzir poluição do menu inicial
+# =========================
+def _abrir_hub(root: tk.Tk, titulo: str, subtitulo: str | None, acoes: list[tuple[str, callable]]) -> None:
+    """
+    Abre uma janela simples com botões para agrupar ações.
+    Mantém a arquitetura (Tkinter) e evita poluição do menu inicial.
+    """
+    win = tk.Toplevel(root)
+    win.title(titulo)
+    win.geometry("520x420")
+    win.minsize(520, 420)
+
+    _configurar_fechamento_toplevel(win, root)
+
+    frame = ttk.Frame(win, padding=16)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(frame, text=titulo, font=("{Segoe UI}", 14, "bold")).pack(anchor="w", pady=(0, 6))
+    if subtitulo:
+        ttk.Label(frame, text=subtitulo).pack(anchor="w", pady=(0, 12))
+
+    for label, fn in acoes:
+        ttk.Button(
+            frame,
+            text=label,
+            style="Menu.TButton",
+            takefocus=False,
+            command=lambda f=fn: f(),
+        ).pack(fill="x", pady=6)
+
+    ttk.Button(
+        frame,
+        text="Fechar",
+        takefocus=False,
+        command=win.destroy,
+    ).pack(anchor="e", pady=(14, 0))
+
+
+def abrir_hub_movimentar(root: tk.Tk) -> None:
+    _abrir_hub(
+        root,
+        titulo="Movimentar estoque",
+        subtitulo="Registre entradas e saídas de forma contínua.",
+        acoes=[
+            ("Entrada", lambda: abrir_movimento(root, "entrada")),
+            ("Saída", lambda: abrir_movimento(root, "saida")),
+        ],
+    )
+
+
+def abrir_hub_consultar(root: tk.Tk) -> None:
+    # Informação “itens em falta” aqui (sai do menu inicial)
+    try:
+        produtos = carregar_produtos()
+        abaixo = [
+            p for p in produtos
+            if _safe_float(p.get("estoque_atual", 0), 0.0) < _safe_float(p.get("estoque_minimo", 0), 0.0)
+        ]
+        info = f"Itens em falta (abaixo do mínimo): {len(abaixo)}"
+    except Exception:
+        info = "Consultar itens e visão geral do estoque."
+
+    _abrir_hub(
+        root,
+        titulo="Consultar",
+        subtitulo=info,
+        acoes=[
+            ("Visão Geral", lambda: abrir_dashboard(root)),
+            ("Estoque", lambda: abrir_tela_produtos(root)),
+        ],
+    )
+
+
+def abrir_hub_movimentacoes(root: tk.Tk) -> None:
+    _abrir_hub(
+        root,
+        titulo="Movimentações",
+        subtitulo="Histórico, relatórios por período e inventário (contagem).",
+        acoes=[
+            ("Histórico", lambda: abrir_historico(root)),
+            ("Relatórios (período)", lambda: abrir_relatorios_periodo(root)),
+            ("Inventário / Contagem", lambda: abrir_inventario_contagem(root)),
+            ("Ajuste de estoque", lambda: abrir_ajuste_estoque(root)),
+        ],
+    )
+
 def main():
     root = tk.Tk()
+    root.withdraw()  # evita o "flash" e aparecer em outro lugar por milissegundos
+
+    # ===== TEMA MODERNO (padrão LIGHT) =====
+    # (Opcional) sv-ttk deixa a interface com cara mais moderna.
+    # Se não estiver instalado, o app roda normalmente com ttk padrão.
+    try:
+        import sv_ttk  # pip install sv-ttk
+        TEMA_OK = True
+    except Exception:
+        TEMA_OK = False
+
+    if TEMA_OK:
+        sv_ttk.set_theme("light")
+
+    # ===== ESTILO GLOBAL (só visual) =====
+    style = ttk.Style()
+
+    # Fonte moderna padrão do Windows (com espaço no nome)
+    root.option_add("*Font", "{Segoe UI} 10")
+
+    # Botões com mais espaçamento (mais “app moderno”)
+    style.configure("TButton", padding=(12, 10))
+    style.configure("Menu.TButton", padding=(12, 10))
+
+    # Tabelas (Treeview) mais elegantes
+    style.configure("Treeview", rowheight=28)
+    style.configure("Treeview.Heading", font=("{Segoe UI}", 10, "bold"))
+
+    # ===== TÍTULO + ÍCONE =====
     root.title("Estoque – Vila Vicentina de Abaeté")
     if ICONE_ICO.exists():
         try:
@@ -974,35 +2076,74 @@ def main():
         except Exception:
             pass
 
-    style = ttk.Style()
-    style.configure("Menu.TButton", padding=(12, 10))
 
+    # ===== MENU DE TEMA (dark/light) =====
+    # Só aparece se o sv-ttk estiver instalado
+    if TEMA_OK:
+        menubar = tk.Menu(root)
+        visual = tk.Menu(menubar, tearoff=0)
+
+        def usar_dark():
+            sv_ttk.set_theme("dark")
+
+        def usar_light():
+            sv_ttk.set_theme("light")
+
+        visual.add_command(label="Tema claro", command=usar_light)
+        visual.add_command(label="Tema escuro", command=usar_dark)
+        menubar.add_cascade(label="Visual", menu=visual)
+        root.config(menu=menubar)
+
+    # ===== LAYOUT PRINCIPAL =====
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
 
-    ttk.Label(frame, text="Controle de Estoque – Vila Vicentina", font=("Segoe UI", 15, "bold")).pack(pady=(0, 12))
+    # guarda o widget que deve receber foco quando voltar das telas
+    root._menu_focus_widget = frame
+    frame.configure(takefocus=True)
+    frame.focus_set()
 
-    ttk.Button(frame, text="Cadastrar Item", style="Menu.TButton",
-               command=lambda: abrir_cadastro_produto(root)).pack(fill="x", pady=6)
+    ttk.Label(
+        frame,
+        text="Controle de Estoque – Vila Vicentina",
+        font=("{Segoe UI}", 15, "bold"),
+    ).pack(pady=(0, 12))
 
-    ttk.Button(frame, text="Adicionar ao estoque", style="Menu.TButton",
-               command=lambda: abrir_movimento(root, "entrada")).pack(fill="x", pady=6)
 
-    ttk.Button(frame, text="Retirar do estoque", style="Menu.TButton",
-               command=lambda: abrir_movimento(root, "saida")).pack(fill="x", pady=6)
+    # ===== MENU INICIAL (ENXUTO) =====
+    ttk.Button(
+        frame,
+        text="Movimentar estoque",
+        style="Menu.TButton",
+        takefocus=False,
+        command=lambda: abrir_hub_movimentar(root),
+    ).pack(fill="x", pady=6)
 
-    ttk.Button(frame, text="Estoque", style="Menu.TButton",
-               command=lambda: abrir_tela_produtos(root)).pack(fill="x", pady=6)
+    ttk.Button(
+        frame,
+        text="Consultar",
+        style="Menu.TButton",
+        takefocus=False,
+        command=lambda: abrir_hub_consultar(root),
+    ).pack(fill="x", pady=6)
 
-    ttk.Button(frame, text="Histórico", style="Menu.TButton",
-               command=lambda: abrir_historico(root)).pack(fill="x", pady=6)
+    ttk.Button(
+        frame,
+        text="Movimentações",
+        style="Menu.TButton",
+        takefocus=False,
+        command=lambda: abrir_hub_movimentacoes(root),
+    ).pack(fill="x", pady=6)
 
-    ttk.Button(frame, text="Itens em falta", style="Menu.TButton",
-               command=lambda: abrir_abaixo_minimo(root)).pack(fill="x", pady=6)
+    ttk.Button(
+        frame,
+        text="Cadastrar item",
+        style="Menu.TButton",
+        takefocus=False,
+        command=lambda: abrir_cadastro_produto(root),
+    ).pack(fill="x", pady=6)
 
     ajustar_janela_ao_conteudo_e_centralizar(root)
+
+    root.deiconify()  # mostra só quando já está pronto e centralizado
     root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
