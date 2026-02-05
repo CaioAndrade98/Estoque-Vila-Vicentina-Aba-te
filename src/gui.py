@@ -101,15 +101,118 @@ def _restaurar_foco_menu(root: tk.Tk) -> None:
 
 
 def _configurar_fechamento_toplevel(win: tk.Toplevel, root: tk.Tk) -> None:
-    """Quando fechar a janela, devolve foco para o menu principal."""
+    """Quando fechar a janela, devolve foco para o menu principal.
+
+    Também dá suporte a "janela única por módulo": se a janela tiver o atributo
+    _singleton_key, ela é removida do registro do root ao fechar.
+    """
     def _on_close():
         try:
+            try:
+                # Libera modal, se estiver ativo
+                win.grab_release()
+            except Exception:
+                pass
+
             win.destroy()
         finally:
+            # limpa registro de janela única (se aplicável)
+            try:
+                key = getattr(win, "_singleton_key", None)
+                ow = getattr(root, "_open_windows", None)
+                if key and isinstance(ow, dict):
+                    if ow.get(key) is win:
+                        del ow[key]
+            except Exception:
+                pass
+
             root.after(0, lambda: _restaurar_foco_menu(root))
 
     win.protocol("WM_DELETE_WINDOW", _on_close)
 
+
+def centralizar_janela(win: tk.Toplevel) -> None:
+    """
+    Centraliza um Toplevel na tela.
+    Funciona mesmo quando a janela está com withdraw(), evitando 'flash' no canto.
+    Mantém o tamanho já definido via geometry().
+    """
+    try:
+        win.update_idletasks()
+    except Exception:
+        pass
+
+    w = h = None
+    try:
+        g = win.geometry()  # ex: "520x420+0+0"
+        m = re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", g)
+        if m:
+            w = int(m.group(1))
+            h = int(m.group(2))
+    except Exception:
+        w = h = None
+
+    if not w or not h:
+        # fallback: requested size
+        try:
+            w = int(win.winfo_reqwidth())
+            h = int(win.winfo_reqheight())
+        except Exception:
+            return
+
+    try:
+        sw = int(win.winfo_screenwidth())
+        sh = int(win.winfo_screenheight())
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
+    except Exception:
+        pass
+
+
+
+# =========================
+# UX: janela única por módulo (evita abrir várias iguais)
+# =========================
+def _get_open_windows(root: tk.Tk) -> dict:
+    ow = getattr(root, "_open_windows", None)
+    if not isinstance(ow, dict):
+        ow = {}
+        setattr(root, "_open_windows", ow)
+    return ow
+
+
+def _singleton_get(root: tk.Tk, key: str) -> tk.Toplevel | None:
+    ow = _get_open_windows(root)
+    win = ow.get(key)
+    try:
+        if win is not None and win.winfo_exists():
+            # traz para frente
+            try:
+                win.deiconify()
+            except Exception:
+                pass
+            try:
+                win.lift()
+                win.focus_force()
+            except Exception:
+                pass
+            return win
+    except Exception:
+        pass
+    # janela morreu; limpa registro
+    try:
+        if key in ow:
+            del ow[key]
+    except Exception:
+        pass
+    return None
+
+
+def _singleton_register(root: tk.Tk, key: str, win: tk.Toplevel) -> None:
+    ow = _get_open_windows(root)
+    ow[key] = win
+    setattr(win, "_singleton_key", key)
 
 def _parse_iso_ts(ts: str) -> datetime | None:
     try:
@@ -135,10 +238,15 @@ def abrir_tela_produtos(root: tk.Tk) -> None:
     produtos = carregar_produtos()
     produtos = sorted(produtos, key=lambda p: str(p.get("nome", "")).lower())
 
+    # janela única: se já estiver aberta, traz para frente
+    if _singleton_get(root, "estoque") is not None:
+        return
+
     win = tk.Toplevel(root)
-    win.title("Itens")
+    win.title("Estoque")
     win.geometry("720x420")
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "estoque", win)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -149,11 +257,35 @@ def abrir_tela_produtos(root: tk.Tk) -> None:
     tree = ttk.Treeview(frame, columns=cols, show="headings", height=14)
     tree.pack(fill="both", expand=True)
 
-    tree.heading("id", text="ID")
-    tree.heading("nome", text="Item")
-    tree.heading("unidade", text="Unidade")
-    tree.heading("atual", text="Atual")
-    tree.heading("minimo", text="Mínimo")
+    # Ordenação por clique no cabeçalho (profissional)
+    sort_state = {"col": None, "desc": False}
+
+    def _coerce(col: str, v: str):
+        if col in ("id", "atual", "minimo"):
+            try:
+                return float(str(v).replace(",", "."))
+            except Exception:
+                return 0.0
+        return str(v).lower()
+
+    def ordenar_por(col: str):
+        # alterna asc/desc ao clicar no mesmo cabeçalho
+        if sort_state["col"] == col:
+            sort_state["desc"] = not sort_state["desc"]
+        else:
+            sort_state["col"] = col
+            sort_state["desc"] = False
+
+        itens = list(tree.get_children(""))
+        itens.sort(key=lambda iid: _coerce(col, tree.set(iid, col)), reverse=sort_state["desc"])
+        for i, iid in enumerate(itens):
+            tree.move(iid, "", i)
+
+    tree.heading("id", text="ID", command=lambda: ordenar_por("id"))
+    tree.heading("nome", text="Item", command=lambda: ordenar_por("nome"))
+    tree.heading("unidade", text="Unidade", command=lambda: ordenar_por("unidade"))
+    tree.heading("atual", text="Atual", command=lambda: ordenar_por("atual"))
+    tree.heading("minimo", text="Mínimo", command=lambda: ordenar_por("minimo"))
 
     tree.column("id", width=60, anchor="center")
     tree.column("nome", width=300)
@@ -784,10 +916,16 @@ def abrir_abaixo_minimo(root: tk.Tk) -> None:
 
 def abrir_historico(root: tk.Tk) -> None:
     LIMITE_PADRAO = 300
+    PAGE_SIZE = 800  # incremental render para evitar lag no Treeview
+
+    # janela única
+    if _singleton_get(root, "historico") is not None:
+        return
 
     win = tk.Toplevel(root)
     win.title("Histórico de movimentações")
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "historico", win)
 
     win.state("zoomed")  # tela cheia no Windows
     win.minsize(1020, 720)
@@ -829,7 +967,7 @@ def abrir_historico(root: tk.Tk) -> None:
     status_var = tk.StringVar(value="")
     ttk.Label(filtros, textvariable=status_var).pack(side="right", padx=(0, 10))
 
-    cols = ("ts", "nome", "tipo", "qtd", "antes", "depois")
+    cols = ("ts", "nome", "tipo", "motivo", "qtd", "antes", "depois")
 
     table_frame = ttk.Frame(frame)
     table_frame.pack(fill="both", expand=True)
@@ -851,21 +989,25 @@ def abrir_historico(root: tk.Tk) -> None:
     tree.heading("ts", text="Data/Hora")
     tree.heading("nome", text="Item")
     tree.heading("tipo", text="Tipo")
+    tree.heading("motivo", text="Motivo")
     tree.heading("qtd", text="Qtd")
     tree.heading("antes", text="Antes")
     tree.heading("depois", text="Depois")
 
     tree.column("ts", width=150, anchor="center")
-    tree.column("nome", width=320)
-    tree.column("tipo", width=90, anchor="center")
-    tree.column("qtd", width=90, anchor="center")
-    tree.column("antes", width=90, anchor="center")
-    tree.column("depois", width=90, anchor="center")
+    tree.column("nome", width=300)
+    tree.column("tipo", width=80, anchor="center")
+    tree.column("motivo", width=220)
+    tree.column("qtd", width=80, anchor="center")
+    tree.column("antes", width=80, anchor="center")
+    tree.column("depois", width=80, anchor="center")
 
     for col in cols:
         tree.heading(col, anchor="center")
 
     movimentos_cache: list[dict] = []
+    filtrados_cache: list[dict] = []
+    render_limit = PAGE_SIZE
 
     def _parse_limite() -> int:
         try:
@@ -884,29 +1026,32 @@ def abrir_historico(root: tk.Tk) -> None:
     def _format_qtd(delta: float) -> float:
         return abs(float(delta))
 
-    def carregar():
-        nonlocal movimentos_cache
-        limite = _parse_limite()
-        movimentos = listar_movimentos(limite=limite)
-        movimentos_cache = list(reversed(movimentos))
-        aplicar_filtro()
-
-    def aplicar_filtro():
-        tree.delete(*tree.get_children())
-
+    def _recalcular_filtrados() -> None:
+        nonlocal filtrados_cache
         termo = normalizar_busca(filtro_var.get().strip())
-        count = 0
 
+        filtrados: list[dict] = []
         for m in movimentos_cache:
             nome = str(m.get("nome", ""))
             nome_norm = normalizar_busca(nome)
-
             if termo and termo not in nome_norm:
                 continue
+            filtrados.append(m)
 
-            delta = float(m.get("delta", 0))
+        filtrados_cache = filtrados
+
+    def _render() -> None:
+        tree.delete(*tree.get_children())
+
+        total = len(filtrados_cache)
+        exibidos = filtrados_cache[:render_limit]
+
+        for m in exibidos:
+            nome = str(m.get("nome", ""))
+            delta = _safe_float(m.get("delta", 0), 0.0)
             dt = _parse_iso_ts(m.get("ts", ""))
             ts = _fmt_dt_br(dt)
+            motivo = str(m.get("motivo", "") or "")
 
             tree.insert(
                 "", "end",
@@ -914,20 +1059,53 @@ def abrir_historico(root: tk.Tk) -> None:
                     ts,
                     nome,
                     _format_tipo(delta),
+                    motivo,
                     _format_qtd(delta),
                     m.get("estoque_antes", ""),
                     m.get("estoque_depois", ""),
                 ),
             )
-            count += 1
 
-        status_var.set(f"{count} registro(s)")
+        if total > render_limit:
+            status_var.set(f"{total} registro(s) — exibindo {render_limit}.")
+        else:
+            status_var.set(f"{total} registro(s)")
 
-    def limpar_filtro():
+        # botão mais: habilita só se ainda houver mais pra carregar
+        try:
+            if total > render_limit:
+                btn_mais.state(["!disabled"])
+            else:
+                btn_mais.state(["disabled"])
+        except Exception:
+            pass
+
+    def carregar() -> None:
+        nonlocal movimentos_cache, render_limit
+        limite = _parse_limite()
+        movimentos = listar_movimentos(limite=limite)
+        movimentos_cache = list(reversed(movimentos))  # mais recentes no topo
+        render_limit = PAGE_SIZE
+        _recalcular_filtrados()
+        _render()
+
+    def aplicar_filtro() -> None:
+        nonlocal render_limit
+        render_limit = PAGE_SIZE
+        _recalcular_filtrados()
+        _render()
+
+    def carregar_mais() -> None:
+        nonlocal render_limit
+        if render_limit < len(filtrados_cache):
+            render_limit = min(render_limit + PAGE_SIZE, len(filtrados_cache))
+            _render()
+
+    def limpar_filtro() -> None:
         filtro_var.set("")
         aplicar_filtro()
 
-    def exportar_csv():
+    def exportar_csv() -> None:
         nome_sugerido = f"historico_estoque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         caminho = filedialog.asksaveasfilename(
@@ -941,20 +1119,35 @@ def abrir_historico(root: tk.Tk) -> None:
 
         try:
             termo = normalizar_busca(filtro_var.get().strip())
-            movs = []
+            linhas = []
             for m in movimentos_cache:
                 nome = str(m.get("nome", ""))
                 nome_norm = normalizar_busca(nome)
                 if termo and termo not in nome_norm:
                     continue
-                movs.append(m)
+                linhas.append(m)
 
-            exportar_movimentos_csv(caminho, limite=len(movs))
+            with open(caminho, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["data_hora", "item", "tipo", "motivo", "qtd", "antes", "depois"])
+                for m in linhas:
+                    delta = _safe_float(m.get("delta", 0), 0.0)
+                    dt = _parse_iso_ts(m.get("ts", ""))
+                    w.writerow([
+                        _fmt_dt_br(dt),
+                        str(m.get("nome", "")),
+                        _format_tipo(delta),
+                        str(m.get("motivo", "") or ""),
+                        _format_qtd(delta),
+                        m.get("estoque_antes", ""),
+                        m.get("estoque_depois", ""),
+                    ])
+
             _ok("CSV exportado com sucesso.", ms=2500)
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível exportar o CSV.\n\n{e}")
 
-    def exportar_excel():
+    def exportar_excel() -> None:
         nome_sugerido = f"historico_estoque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
         caminho = filedialog.asksaveasfilename(
@@ -967,22 +1160,69 @@ def abrir_historico(root: tk.Tk) -> None:
             return
 
         try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+
             termo = normalizar_busca(filtro_var.get().strip())
-            movs = []
+            linhas = []
             for m in movimentos_cache:
                 nome = str(m.get("nome", ""))
                 nome_norm = normalizar_busca(nome)
                 if termo and termo not in nome_norm:
                     continue
-                movs.append(m)
+                linhas.append(m)
 
-            exportar_movimentos_xlsx(caminho, movs)
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Histórico"
+
+            header = ["Data/Hora", "Item", "Tipo", "Motivo", "Qtd", "Antes", "Depois"]
+            ws.append(header)
+
+            header_font = Font(bold=True)
+            header_fill = PatternFill("solid", fgColor="DDDDDD")
+            header_align = Alignment(horizontal="center")
+
+            for col in range(1, len(header) + 1):
+                c = ws.cell(row=1, column=col)
+                c.font = header_font
+                c.fill = header_fill
+                c.alignment = header_align
+
+            for m in linhas:
+                delta = _safe_float(m.get("delta", 0), 0.0)
+                dt = _parse_iso_ts(m.get("ts", ""))
+                ws.append([
+                    _fmt_dt_br(dt),
+                    str(m.get("nome", "")),
+                    _format_tipo(delta),
+                    str(m.get("motivo", "") or ""),
+                    _format_qtd(delta),
+                    m.get("estoque_antes", ""),
+                    m.get("estoque_depois", ""),
+                ])
+
+            # largura
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.value is not None:
+                        max_len = max(max_len, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = min(max_len + 2, 55)
+
+            wb.save(caminho)
             _ok("Excel exportado com sucesso.", ms=2500)
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível exportar o Excel.\n\n{e}")
 
     botoes = ttk.Frame(frame)
     botoes.pack(fill="x", pady=(10, 0))
+
+    # 'Carregar mais' (incremental) para evitar lag com muitos registros
+    btn_mais = ttk.Button(botoes, text=f"Carregar mais {PAGE_SIZE}", command=carregar_mais, takefocus=False)
+    btn_mais.pack(side="left")
 
     ttk.Button(botoes, text="Atualizar", command=carregar, takefocus=False).pack(side="right")
     ttk.Button(botoes, text="Exportar Excel", command=exportar_excel, takefocus=False).pack(side="right", padx=(0, 8))
@@ -1000,11 +1240,16 @@ def abrir_historico(root: tk.Tk) -> None:
 # 1) DASHBOARD - VISÃO GERAL
 # ============================================================
 def abrir_dashboard(root: tk.Tk) -> None:
+    # janela única
+    if _singleton_get(root, "dashboard") is not None:
+        return
+
     win = tk.Toplevel(root)
     win.title("Visão Geral")
     win.state("zoomed")   # tela cheia no Windows
     win.minsize(1180, 640)
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "dashboard", win)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -1052,11 +1297,40 @@ def abrir_dashboard(root: tk.Tk) -> None:
     xscroll_cov.pack(side="bottom", fill="x")
     tree_cov.configure(xscrollcommand=xscroll_cov.set)
 
-    tree_cov.heading("nome", text="Item")
-    tree_cov.heading("un", text="Unid.")
-    tree_cov.heading("atual", text="Atual")
-    tree_cov.heading("min", text="Mínimo")
-    tree_cov.heading("cob", text="Cobertura")
+    # Ordenação por clique no cabeçalho (profissional)
+    _sort_cov = {"col": None, "desc": False}
+
+    def _coerce_cov(col: str, v: str):
+        if col in ("atual", "min"):
+            try:
+                return float(str(v).replace(",", "."))
+            except Exception:
+                return 0.0
+        if col == "cob":
+            # ex: "0.85x"
+            try:
+                return float(str(v).lower().replace("x", "").replace(",", ".").strip())
+            except Exception:
+                return 0.0
+        return str(v).lower()
+
+    def ordenar_cov(col: str):
+        if _sort_cov["col"] == col:
+            _sort_cov["desc"] = not _sort_cov["desc"]
+        else:
+            _sort_cov["col"] = col
+            _sort_cov["desc"] = False
+
+        itens = list(tree_cov.get_children(""))
+        itens.sort(key=lambda iid: _coerce_cov(col, tree_cov.set(iid, col)), reverse=_sort_cov["desc"])
+        for i, iid in enumerate(itens):
+            tree_cov.move(iid, "", i)
+
+    tree_cov.heading("nome", text="Item", command=lambda: ordenar_cov("nome"))
+    tree_cov.heading("un", text="Unid.", command=lambda: ordenar_cov("un"))
+    tree_cov.heading("atual", text="Atual", command=lambda: ordenar_cov("atual"))
+    tree_cov.heading("min", text="Mínimo", command=lambda: ordenar_cov("min"))
+    tree_cov.heading("cob", text="Cobertura", command=lambda: ordenar_cov("cob"))
 
     tree_cov.column("nome", width=320)
     tree_cov.column("un", width=70, anchor="center")
@@ -1078,10 +1352,39 @@ def abrir_dashboard(root: tk.Tk) -> None:
     xscroll_mov.pack(side="bottom", fill="x")
     tree_mov.configure(xscrollcommand=xscroll_mov.set)
 
-    tree_mov.heading("ts", text="Data/Hora")
-    tree_mov.heading("nome", text="Item")
-    tree_mov.heading("tipo", text="Tipo")
-    tree_mov.heading("qtd", text="Qtd")
+    # Ordenação por clique no cabeçalho (profissional)
+    _sort_mov = {"col": None, "desc": False}
+
+    def _coerce_mov(col: str, v: str):
+        if col == "qtd":
+            try:
+                return float(str(v).replace(",", "."))
+            except Exception:
+                return 0.0
+        if col == "ts":
+            # formato BR: dd/mm/YYYY HH:MM
+            try:
+                return datetime.strptime(str(v), "%d/%m/%Y %H:%M")
+            except Exception:
+                return datetime.min
+        return str(v).lower()
+
+    def ordenar_mov(col: str):
+        if _sort_mov["col"] == col:
+            _sort_mov["desc"] = not _sort_mov["desc"]
+        else:
+            _sort_mov["col"] = col
+            _sort_mov["desc"] = False
+
+        itens = list(tree_mov.get_children(""))
+        itens.sort(key=lambda iid: _coerce_mov(col, tree_mov.set(iid, col)), reverse=_sort_mov["desc"])
+        for i, iid in enumerate(itens):
+            tree_mov.move(iid, "", i)
+
+    tree_mov.heading("ts", text="Data/Hora", command=lambda: ordenar_mov("ts"))
+    tree_mov.heading("nome", text="Item", command=lambda: ordenar_mov("nome"))
+    tree_mov.heading("tipo", text="Tipo", command=lambda: ordenar_mov("tipo"))
+    tree_mov.heading("qtd", text="Qtd", command=lambda: ordenar_mov("qtd"))
 
     tree_mov.column("ts", width=140, anchor="center")
     tree_mov.column("nome", width=320)
@@ -1161,11 +1464,16 @@ def abrir_dashboard(root: tk.Tk) -> None:
 # 2) RELATÓRIOS POR PERÍODO
 # ============================================================
 def abrir_relatorios_periodo(root: tk.Tk) -> None:
+    # janela única
+    if _singleton_get(root, "relatorios_periodo") is not None:
+        return
+
     win = tk.Toplevel(root)
     win.title("Relatórios por período")
     win.state("zoomed")  # tela cheia no Windows
     win.minsize(1150, 720)
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "relatorios_periodo", win)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -1427,6 +1735,7 @@ def abrir_ajuste_estoque(root: tk.Tk) -> None:
     win.geometry("620x520")
     win.minsize(620, 520)
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "relatorios_periodo", win)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -1638,11 +1947,16 @@ def abrir_inventario_contagem(root: tk.Tk) -> None:
         messagebox.showinfo("Sem itens", "Cadastre um item antes.")
         return
 
+    # janela única
+    if _singleton_get(root, "inventario") is not None:
+        return
+
     win = tk.Toplevel(root)
     win.title("Inventário / Contagem")
     win.state("zoomed")  # tela cheia no Windows
     win.minsize(1100, 720)
     _configurar_fechamento_toplevel(win, root)
+    _singleton_register(root, "inventario", win)
 
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
@@ -1665,12 +1979,38 @@ def abrir_inventario_contagem(root: tk.Tk) -> None:
     tree = ttk.Treeview(frame, columns=cols, show="headings", height=18)
     tree.pack(fill="both", expand=True)
 
-    tree.heading("id", text="ID")
-    tree.heading("nome", text="Item")
-    tree.heading("un", text="Unid.")
-    tree.heading("atual", text="Atual")
-    tree.heading("contado", text="Contado")
-    tree.heading("diff", text="Diferença")
+    # mostra tudo internamente, mas oculta visualmente o ID (mantém funcionamento normal)
+    tree["displaycolumns"] = ("nome", "un", "atual", "contado", "diff")
+
+    # Ordenação por clique no cabeçalho (profissional)
+    _sort_inv = {"col": None, "desc": False}
+
+    def _coerce_inv(col: str, v: str):
+        if col in ("id", "atual", "contado", "diff"):
+            try:
+                return float(str(v).replace(",", "."))
+            except Exception:
+                return 0.0
+        return str(v).lower()
+
+    def ordenar_inv(col: str):
+        if _sort_inv["col"] == col:
+            _sort_inv["desc"] = not _sort_inv["desc"]
+        else:
+            _sort_inv["col"] = col
+            _sort_inv["desc"] = False
+
+        itens = list(tree.get_children(""))
+        itens.sort(key=lambda iid: _coerce_inv(col, tree.set(iid, col)), reverse=_sort_inv["desc"])
+        for i, iid in enumerate(itens):
+            tree.move(iid, "", i)
+
+    tree.heading("id", text="ID", command=lambda: ordenar_inv("id"))
+    tree.heading("nome", text="Item", command=lambda: ordenar_inv("nome"))
+    tree.heading("un", text="Unid.", command=lambda: ordenar_inv("un"))
+    tree.heading("atual", text="Atual", command=lambda: ordenar_inv("atual"))
+    tree.heading("contado", text="Contado", command=lambda: ordenar_inv("contado"))
+    tree.heading("diff", text="Diferença", command=lambda: ordenar_inv("diff"))
 
     tree.column("id", width=60, anchor="center")
     tree.column("nome", width=380)
@@ -1957,21 +2297,62 @@ def ajustar_janela_ao_conteudo_e_centralizar(root: tk.Tk, margem: int = 24) -> N
 def _abrir_hub(root: tk.Tk, titulo: str, subtitulo: str | None, acoes: list[tuple[str, callable]]) -> None:
     """
     Abre uma janela simples com botões para agrupar ações.
-    Mantém a arquitetura (Tkinter) e evita poluição do menu inicial.
+
+    Melhorias de UX (apenas para hubs):
+    - Evita múltiplos hubs abertos: ao abrir um hub, fecha outros hubs.
+    - Navegação linear: ao clicar numa ação do hub, fecha o hub e abre a tela destino.
+    - Usa grab_set() para impedir interação com o root por trás (sem fechar o app).
+    - Evita "flash" (canto superior esquerdo): cria oculto (withdraw) e exibe após configurar.
     """
     win = tk.Toplevel(root)
+    win.withdraw()  # evita o flash antes de posicionar
+    win._is_hub = True  # marcador: esta janela é um hub
+
+    # Fecha outros hubs abertos (não fecha telas de trabalho)
+    for w in root.winfo_children():
+        if w is win:
+            continue
+        if isinstance(w, tk.Toplevel) and getattr(w, "_is_hub", False):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
     win.title(titulo)
     win.geometry("520x420")
-    win.minsize(520, 420)
+    win.minsize(520, 200)
 
-    _configurar_fechamento_toplevel(win, root)
+    def _on_close() -> None:
+        # Libera o grab (se houver) para não "travar" o app
+        try:
+            win.grab_release()
+        except Exception:
+            pass
+        try:
+            win.destroy()
+        finally:
+            root.after(0, lambda: _restaurar_foco_menu(root))
+
+    win.protocol("WM_DELETE_WINDOW", _on_close)
 
     frame = ttk.Frame(win, padding=16)
     frame.pack(fill="both", expand=True)
 
-    ttk.Label(frame, text=titulo, font=("{Segoe UI}", 14, "bold")).pack(anchor="w", pady=(0, 6))
+    ttk.Label(frame, text=titulo, font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 6))
     if subtitulo:
         ttk.Label(frame, text=subtitulo).pack(anchor="w", pady=(0, 12))
+
+    def _ir_para(fn: callable) -> None:
+        # Fecha o hub antes de abrir a próxima tela
+        try:
+            win.grab_release()
+        except Exception:
+            pass
+        try:
+            win.destroy()
+        except Exception:
+            pass
+        root.after(0, fn)
 
     for label, fn in acoes:
         ttk.Button(
@@ -1979,15 +2360,28 @@ def _abrir_hub(root: tk.Tk, titulo: str, subtitulo: str | None, acoes: list[tupl
             text=label,
             style="Menu.TButton",
             takefocus=False,
-            command=lambda f=fn: f(),
+            command=lambda f=fn: _ir_para(f),
         ).pack(fill="x", pady=6)
 
     ttk.Button(
         frame,
         text="Fechar",
         takefocus=False,
-        command=win.destroy,
+        command=_on_close,
     ).pack(anchor="e", pady=(14, 0))
+
+    # Só exibe depois de posicionar e montar widgets (evita flash)
+    win.update_idletasks()
+    centralizar_janela(win)
+    win.deiconify()
+
+    # Garante que o hub fique na frente e capture interação
+    try:
+        win.lift()
+        win.focus_force()
+        win.grab_set()
+    except Exception:
+        pass
 
 
 def abrir_hub_movimentar(root: tk.Tk) -> None:
@@ -2113,7 +2507,7 @@ def main():
     # ===== MENU INICIAL (ENXUTO) =====
     ttk.Button(
         frame,
-        text="Movimentar estoque",
+        text="Movimentar Estoque",
         style="Menu.TButton",
         takefocus=False,
         command=lambda: abrir_hub_movimentar(root),

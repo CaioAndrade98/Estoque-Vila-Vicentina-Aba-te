@@ -160,6 +160,7 @@ def move_stock_by_id(produto_id: int, delta: float, motivo: str | None = None) -
                 delta=float(d),
                 estoque_antes=float(atual),
                 estoque_depois=float(novo),
+                motivo=motivo
 )
 
             return p
