@@ -2205,7 +2205,7 @@ def abrir_inventario_contagem(root: tk.Tk) -> None:
 
     def aplicar_ajustes():
         # motivo fixo (UI): "Contagem"
-        # (motivo não é gravado no histórico do core ainda)
+        mot = "Contagem"
         ajustes = []
         for iid, r in linhas.items():
             contado = r.get("contado")
