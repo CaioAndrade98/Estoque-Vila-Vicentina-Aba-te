@@ -2440,7 +2440,7 @@ def main():
     # (Opcional) sv-ttk deixa a interface com cara mais moderna.
     # Se não estiver instalado, o app roda normalmente com ttk padrão.
     try:
-        import sv_ttk  # pip install sv-ttk
+        import sv_ttk  # type: ignore
         TEMA_OK = True
     except Exception:
         TEMA_OK = False
