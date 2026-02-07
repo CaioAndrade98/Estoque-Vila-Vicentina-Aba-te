@@ -399,10 +399,10 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
     nome_entry.focus_set()
 
 
-def atualizar_estoque(produto_id: int, delta: float) -> None:
+def atualizar_estoque(produto_id: int, delta: float, motivo: str | None = None) -> None:
     """Movimenta estoque usando o core (regra única)."""
     try:
-        move_stock_by_id(produto_id, delta)
+        move_stock_by_id(produto_id, delta, motivo=motivo)
     except ProdutoNaoEncontrado as e:
         raise ValueError(str(e))
     except EstoqueInsuficiente as e:
