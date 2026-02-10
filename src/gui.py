@@ -1733,7 +1733,7 @@ def abrir_ajuste_estoque(root: tk.Tk) -> None:
     win = tk.Toplevel(root)
     win.title("Ajuste de estoque")
     win.geometry("620x520")
-    win.minsize(620, 520)
+    win.minsize(620, 720)
     _configurar_fechamento_toplevel(win, root)
     _singleton_register(root, "relatorios_periodo", win)
 
@@ -1878,6 +1878,26 @@ def abrir_ajuste_estoque(root: tk.Tk) -> None:
     cb = ttk.Combobox(frame, values=motivos, textvariable=motivo_var, state="readonly")
     cb.pack(fill="x", pady=(0, 10))
 
+    # descrição do "Outro" (aparece só quando motivo == "Outro")
+    outro_desc_var = tk.StringVar(value="")
+
+    frm_outro = ttk.Frame(frame)
+    ttk.Label(frm_outro, text="Descreva o motivo (obrigatório para 'Outro')").pack(anchor="w")
+    ent_outro = ttk.Entry(frm_outro, textvariable=outro_desc_var)
+    ent_outro.pack(fill="x")
+
+    def _toggle_outro(*_):
+        if motivo_var.get().strip() == "Outro":
+            frm_outro.pack(fill="x", pady=(0, 10))
+            ent_outro.focus_set()
+        else:
+            frm_outro.pack_forget()
+            outro_desc_var.set("")
+
+    cb.bind("<<ComboboxSelected>>", _toggle_outro)
+    # garante estado inicial correto
+    _toggle_outro()
+
     # delta
     ttk.Label(frame, text="Quantidade do ajuste (use negativo para reduzir, ex: -2)").pack(anchor="w")
     qtd_var = tk.StringVar(value="")
@@ -1903,6 +1923,17 @@ def abrir_ajuste_estoque(root: tk.Tk) -> None:
             status_var.set("Selecione um motivo.")
             cb.focus_set()
             return
+
+    # Se for "Outro", exigir descrição e salvar como "Outro: <descrição>"
+        
+        if mot == "Outro":
+            desc = outro_desc_var.get().strip()
+            if not desc:
+                status_var.set("Descreva o motivo para 'Outro'.")
+                frm_outro.pack(fill="x", pady=(0, 10))
+                ent_outro.focus_set()
+                return
+            mot = f"Outro: {desc}"
 
         txt = qtd_var.get().strip().replace(",", ".")
         try:
