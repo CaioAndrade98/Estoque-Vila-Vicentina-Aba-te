@@ -317,6 +317,8 @@ def abrir_cadastro_produto(root: tk.Tk) -> None:
     win.minsize(520, 300)
     _configurar_fechamento_toplevel(win, root)
 
+    centralizar_janela(win)
+
     frame = ttk.Frame(win, padding=12)
     frame.pack(fill="both", expand=True)
 
@@ -430,6 +432,7 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     win = tk.Toplevel(root)
     win.title("Entrada de Estoque" if tipo == "entrada" else "Saída de Estoque")
     win.geometry("560x560")  # ligeiro aumento para caber prévia/status
+    centralizar_janela(win)
     _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
@@ -2327,8 +2330,20 @@ def ajustar_janela_ao_conteudo_e_centralizar(root: tk.Tk, margem: int = 24) -> N
     y = (sh - h) // 2
 
     root.geometry(f"{w}x{h}+{x}+{y}")
-    root.minsize(w, h)
 
+def centralizar_janela(root: tk.Tk) -> None:
+    root.update_idletasks()
+
+    w = root.winfo_width()
+    h = root.winfo_height()
+
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+
+    x = (sw - w) // 2
+    y = (sh - h) // 2
+
+    root.geometry(f"{w}x{h}+{x}+{y}")
 
 
 # =========================
