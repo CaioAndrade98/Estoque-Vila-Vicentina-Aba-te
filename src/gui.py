@@ -429,7 +429,7 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
 
     win = tk.Toplevel(root)
     win.title("Entrada de Estoque" if tipo == "entrada" else "Saída de Estoque")
-    win.geometry("560x470")  # ligeiro aumento para caber prévia/status
+    win.geometry("560x560")  # ligeiro aumento para caber prévia/status
     _configurar_fechamento_toplevel(win, root)
 
     frame = ttk.Frame(win, padding=12)
@@ -693,6 +693,12 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
     ent_qtd = ttk.Entry(frame, textvariable=qtd_var)
     ent_qtd.pack(fill="x", pady=(0, 12))
 
+    ttk.Label(frame, text="Motivo (opcional)").pack(anchor="w")
+    motivo_var = tk.StringVar()
+    ent_motivo = ttk.Entry(frame, textvariable=motivo_var)
+    ent_motivo.pack(fill="x", pady=(0, 12))
+
+    
     # ✅ Aviso imediato: SAÍDA com quantidade maior que estoque atual
     _warn_ativa = False
 
@@ -806,7 +812,9 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
 
         try:
             delta = qtd if tipo == "entrada" else -qtd
-            atualizar_estoque(int(pid), float(delta))
+            motivo = motivo_var.get().strip() or None
+            atualizar_estoque(int(pid), float(delta), motivo=motivo)
+
         except ValueError as e:
             messagebox.showerror("Erro", str(e))
             ent_qtd.focus_set()
@@ -819,6 +827,7 @@ def abrir_movimento(root: tk.Tk, tipo: str) -> None:
         )
 
         qtd_var.set("")
+        motivo_var.set("")
 
         novos = carregar_produtos()
         for pp in novos:
