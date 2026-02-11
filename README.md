@@ -10,7 +10,7 @@ instituição.
 
 ## 🎥 Demonstração do sistema
 
-![Demonstração do sistema](gifestoque.gif)
+![Demonstração do sistema](assets/gifestoque.gif)
 
 ------------------------------------------------------------------------
 
