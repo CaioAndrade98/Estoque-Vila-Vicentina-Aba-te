@@ -1,126 +1,118 @@
-# Sistema de Controle de Estoque – Vila Vicentina Abaeté
+# 📦 Sistema de Controle de Estoque -- Vila Vicentina Abaeté
 
-Aplicação desktop desenvolvida em Python para controle de estoque de doações da **Vila Vicentina de Abaeté**.
+Aplicação desktop desenvolvida em **Python** para controle de estoque de
+doações da **Vila Vicentina de Abaeté**.
 
-O projeto nasceu de uma necessidade real: organizar a entrada e saída de alimentos e itens doados, evitar perdas por falta de controle e facilitar o acompanhamento de estoque mínimo no dia a dia da instituição.
+O projeto surgiu a partir de uma necessidade real: organizar entradas e
+saídas de alimentos e itens doados, evitar perdas por falta de controle
+e facilitar o acompanhamento de estoque mínimo no dia a dia da
+instituição.
 
----
+## 🎥 Demonstração do sistema
+
+![Demonstração do sistema](gifestoque.gif)
+
+------------------------------------------------------------------------
 
 ## 🎯 Objetivo do projeto
 
-Criar uma aplicação simples, funcional e estável para uso real, sem depender de conhecimento técnico por parte do usuário final.
+Criar uma aplicação simples, estável e prática para uso real, sem exigir
+conhecimento técnico do usuário final.
 
-O foco não foi “mostrar tecnologia”, mas **resolver um problema prático**, com uma interface direta e dados persistentes.
+O foco principal não foi "mostrar tecnologia", mas sim **resolver um
+problema concreto**, com uma interface direta, fluxo intuitivo e dados
+persistentes de forma segura.
 
----
+------------------------------------------------------------------------
 
-## Funcionalidades
+## 🧾 Funcionalidades
 
-- Cadastro de itens
-- Entrada e saída de estoque
-- Dashboard com visão geral
-- Histórico com exportação CSV/Excel
-- Relatórios por período
-- Inventário guiado
+-   Cadastro de itens\
+-   Entrada e saída de estoque\
+-   Dashboard com visão geral\
+-   Histórico de movimentações com exportação CSV/Excel\
+-   Relatórios por período\
+-   Inventário guiado
 
----
+------------------------------------------------------------------------
 
 ## ✅ Como testar (Windows)
 
-1. Acesse a aba **Releases** deste repositório
-2. Baixe o arquivo `.zip` da versão mais recente
-3. Extraia a pasta
-4. Execute `EstoqueONG.exe`
+1.  Acesse a aba **Releases** deste repositório\
+2.  Baixe o arquivo `.zip` da versão mais recente\
+3.  Extraia a pasta\
+4.  Execute `EstoqueONG.exe`
 
-Os dados do sistema são salvos automaticamente em `%APPDATA%\EstoqueONG`.
+Os dados são salvos automaticamente em:
+
+    %APPDATA%\EstoqueONG
+
+------------------------------------------------------------------------
 
 ## 🖥️ Interface (GUI)
 
-- Interface gráfica desenvolvida com **Tkinter**
-- Busca inteligente com:
-  - rolagem
-  - filtro por início do nome (startswith)
-  - filtro por conteúdo (contains)
-- Pensada para uso por pessoas sem familiaridade com sistemas complexos
+-   Desenvolvida com **Tkinter**
+-   Busca inteligente com:
+    -   rolagem de resultados\
+    -   filtro por início do nome\
+    -   filtro por conteúdo\
+-   Pensada para usuários sem familiaridade com sistemas complexos
 
----
+------------------------------------------------------------------------
 
-## 🔗 API
+## 🧱 Arquitetura
 
-O projeto possui uma **API REST interna** desenvolvida com **FastAPI**, utilizada como camada de serviço:
+-   `gui.py` → Interface gráfica\
+-   `estoque_core.py` → Regras de negócio\
+-   `api.py` → Estrutura para camada de serviço futura
 
-- Centraliza regras de negócio
-- Garante consistência entre interface e dados
-- Facilita futuras integrações (ex: relatórios, rede local, web)
+### Princípios:
 
----
+-   Core como fonte única de verdade\
+-   Interface desacoplada\
+-   Persistência segura\
+-   Estrutura preparada para crescimento
 
-## 🧠 Arquitetura e decisões técnicas
+------------------------------------------------------------------------
 
-- Separação clara de responsabilidades:
-  - `gui.py` → interface
-  - `estoque_core.py` → regras de negócio e persistência
-  - `api.py` → camada de serviço
-- O **core é a única fonte de verdade** para os dados
-- Persistência em `%APPDATA%` (padrão de aplicações desktop no Windows)
-- Backups automáticos dos dados
-- Estrutura organizada para evitar acoplamento e retrabalho
+## 🔗 Camada de serviço (em evolução)
 
----
+Estrutura preparada com **FastAPI** para futuras integrações como:
+
+-   rede local\
+-   aplicações web\
+-   relatórios externos
+
+Atualmente o core centraliza toda a lógica.
+
+------------------------------------------------------------------------
 
 ## 📦 Distribuição
 
-A aplicação é empacotada como **executável (.exe)** usando PyInstaller.
+Aplicação empacotada em `.exe` com **PyInstaller**.
 
-- Não requer Python instalado
-- Basta copiar a pasta e executar
-- Cada usuário possui seus próprios dados locais
+------------------------------------------------------------------------
 
----
+## 🧠 Aprendizados
 
-## 🚀 Motivação pessoal
+-   Arquitetura em camadas\
+-   Refatoração real\
+-   Persistência desktop\
+-   Build e distribuição\
+-   Organização de projetos
 
-Este projeto faz parte do meu processo de aprendizado prático em desenvolvimento de software.
+------------------------------------------------------------------------
 
-Mais do que “funcionar”, o foco foi:
-- organizar código
-- lidar com refatoração real
-- resolver problemas de estrutura, imports e build
-- entregar algo utilizável fora do ambiente de desenvolvimento
+## 🛠️ Tecnologias
 
-É um projeto simples em escopo, mas **real em complexidade**.
+-   Python\
+-   Tkinter\
+-   FastAPI\
+-   PyInstaller\
+-   Git
 
----
-
-## 🛠️ Tecnologias utilizadas
-
-- Python
-- Tkinter
-- FastAPI
-- PyInstaller
-- Git / GitHub
-
----
+------------------------------------------------------------------------
 
 ## 📌 Status
 
-Projeto funcional, em uso de testes e preparado para futuras melhorias, como:
-- relatórios
-- exportação de dados
-- controle de usuários
-- execução em rede local
-
-## ✨ Melhorias recentes (v0.1.1)
-
-- Aviso visual ao tentar retirar quantidade maior que o estoque disponível
-- Bloqueio da confirmação em operações de saída inválidas
-- Fluxo contínuo para entrada e saída de estoque
-- Feedback visual discreto, com menos popups
-
-
-### v0.2.0
-- Dashboard de visão geral
-- Histórico avançado
-- Relatórios por período
-- Inventário guiado
-- Melhorias de UX
+Sistema funcional em uso de testes e pronto para evoluções.
