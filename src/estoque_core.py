@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from typing import Any, Dict, List
-from .config import ARQUIVO_DADOS, BACKUP_DIR, ARQUIVO_HISTORICO
+from .config import ARQUIVO_DADOS, BACKUP_DIR, ARQUIVO_HISTORICO, ARQUIVO_CONFIG
 
 import csv
 from pathlib import Path
@@ -25,6 +26,37 @@ class ProdutoDuplicado(Exception):
 def _normalizar_nome(nome: str) -> str:
     return " ".join(nome.strip().lower().split())
 
+from openpyxl import load_workbook
+
+def importar_planilha_inicial(caminho_xlsx: str) -> None:
+    wb = load_workbook(caminho_xlsx, data_only=True)
+    ws = wb.active
+
+    produtos = []
+    proximo_id = 1
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        nome, entrada, saidas, estoque_final = row
+
+        if not nome:
+            continue
+
+        try:
+            estoque = int(estoque_final or 0)
+        except:
+            estoque = 0
+
+        produto = {
+            "id": proximo_id,
+            "nome": str(nome).strip(),
+            "quantidade": estoque,
+            "estoque_minimo": 0
+        }
+
+        produtos.append(produto)
+        proximo_id += 1
+
+    _salvar_produtos(produtos)
 
 def _carregar_produtos() -> List[Dict[str, Any]]:
     if not ARQUIVO_DADOS.exists():
@@ -36,6 +68,76 @@ def _carregar_produtos() -> List[Dict[str, Any]]:
     except Exception:
         return []
 
+def _ler_config_usuario() -> dict:
+    try:
+        if ARQUIVO_CONFIG.exists():
+            return json.loads(ARQUIVO_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def _salvar_config_usuario(cfg: dict) -> None:
+    try:
+        ARQUIVO_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        ARQUIVO_CONFIG.write_text(
+            json.dumps(cfg, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+def set_pasta_backup_externo(pasta: str) -> None:
+    cfg = _ler_config_usuario()
+    cfg["backup_externo_dir"] = str(pasta or "").strip()
+    _salvar_config_usuario(cfg)
+
+def get_pasta_backup_externo() -> str:
+    return str(_ler_config_usuario().get("backup_externo_dir", "")).strip()
+
+def _backup_externo() -> None:
+    pasta = get_pasta_backup_externo()
+    if not pasta:
+        return
+    try:
+        destino = Path(pasta)
+        destino.mkdir(parents=True, exist_ok=True)
+
+        if ARQUIVO_DADOS.exists():
+            shutil.copy2(ARQUIVO_DADOS, destino / "dados.json")
+
+        if ARQUIVO_HISTORICO.exists():
+            shutil.copy2(ARQUIVO_HISTORICO, destino / "movimentos.jsonl")
+    except Exception:
+        # Backup externo nunca pode quebrar o app
+        pass
+
+def restaurar_backup_externo() -> bool:
+    pasta = get_pasta_backup_externo()
+    if not pasta:
+        return False
+
+    try:
+        origem = Path(pasta)
+
+        dados_origem = origem / "dados.json"
+        historico_origem = origem / "movimentos.jsonl"
+
+        if not dados_origem.exists():
+            return False
+
+        shutil.copy2(dados_origem, ARQUIVO_DADOS)
+
+        if historico_origem.exists():
+            shutil.copy2(historico_origem, ARQUIVO_HISTORICO)
+
+        return True
+
+    except Exception:
+        return False
+
+def estoque_ja_existe() -> bool:
+    produtos = _carregar_produtos()
+    return len(produtos) > 0
 
 def _salvar_produtos(produtos: List[Dict[str, Any]]) -> None:
     ARQUIVO_DADOS.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +153,7 @@ def _salvar_produtos(produtos: List[Dict[str, Any]]) -> None:
             json.dump(produtos, bf, ensure_ascii=False, indent=2)
     except Exception:
         pass
+    _backup_externo()
 
 def _registrar_movimento(
     produto_id: int,

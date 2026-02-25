@@ -5,6 +5,9 @@ import re
 from datetime import datetime, date, timedelta
 import csv
 
+from .estoque_core import restaurar_backup_externo
+from .estoque_core import importar_planilha_inicial
+from .estoque_core import estoque_ja_existe
 from .config import ICONE_ICO  # gui.py e config.py estão em src/
 from .estoque_core import (
     listar_produtos,
@@ -16,6 +19,8 @@ from .estoque_core import (
     ProdutoNaoEncontrado,
     EstoqueInsuficiente,
     ProdutoDuplicado,
+    set_pasta_backup_externo,
+    get_pasta_backup_externo,
 )
 
 
@@ -33,6 +38,46 @@ def gerar_proximo_id(produtos: list[dict]) -> int:
     """Compatibilidade: IDs são gerados no core."""
     raise NotImplementedError("IDs são gerados no core")
 
+def importar_planilha_excel(root):
+
+    if estoque_ja_existe():
+        messagebox.showwarning(
+            "Importação bloqueada",
+            "Já existem produtos cadastrados.\n\n"
+            "A importação inicial só pode ser feita com o sistema vazio.",
+            parent=root
+        )
+        return
+
+    caminho = filedialog.askopenfilename(
+        title="Selecione a planilha da Vila",
+        filetypes=[("Planilhas Excel", "*.xlsx *.xls")]
+    )
+
+    if not caminho:
+        return
+
+    importar_planilha_inicial(caminho)
+    messagebox.showinfo("Concluído", "Estoque importado com sucesso!", parent=root)
+
+def restaurar_backup_drive(root):
+    pasta = get_pasta_backup_externo()
+    if not pasta:
+        messagebox.showwarning("Backup", "Configure primeiro a pasta do Google Drive.", parent=root)
+        return
+
+    if not messagebox.askyesno(
+        "Restaurar backup",
+        "Isso vai substituir os dados atuais.\n\nDeseja continuar?",
+        parent=root
+    ):
+        return
+
+    sucesso = restaurar_backup_externo()  # usa a pasta configurada
+    if sucesso:
+        messagebox.showinfo("Sucesso", "Backup restaurado com sucesso!\nReinicie o sistema.", parent=root)
+    else:
+        messagebox.showerror("Erro", "Não foi possível restaurar o backup.\nVerifique se há dados.json na pasta do Drive.", parent=root)
 
 def normalizar_nome(nome: str) -> str:
     return " ".join(nome.strip().lower().split())
@@ -42,6 +87,32 @@ def remover_acentos(s: str) -> str:
     nfkd = unicodedata.normalize("NFKD", s)
     return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
 
+def configurar_backup_google_drive(root):
+    pasta_atual = get_pasta_backup_externo()
+
+    pasta = filedialog.askdirectory(
+        parent=root,
+        title="Selecione a pasta do Google Drive para backup",
+        initialdir=pasta_atual if pasta_atual else None,
+    )
+    if not pasta:
+        return
+
+    set_pasta_backup_externo(pasta)
+    messagebox.showinfo("Backup configurado", f"Backup externo configurado para:\n\n{pasta}", parent=root)
+
+
+def mostrar_backup_google_drive(root):
+    pasta_atual = get_pasta_backup_externo()
+    if pasta_atual:
+        messagebox.showinfo("Backup externo", f"Pasta atual:\n\n{pasta_atual}", parent=root)
+    else:
+        messagebox.showinfo("Backup externo", "Backup externo ainda não configurado.", parent=root)
+
+
+def desativar_backup_google_drive(root):
+    set_pasta_backup_externo("")
+    messagebox.showinfo("Backup externo", "Backup externo desativado.", parent=root)
 
 def normalizar_busca(s: str) -> str:
     """
@@ -2527,21 +2598,41 @@ def main():
 
 
     # ===== MENU DE TEMA (dark/light) =====
-    # Só aparece se o sv-ttk estiver instalado
+    menubar = tk.Menu(root)
+
+    # ===== Configurações =====
+    config_menu = tk.Menu(menubar, tearoff=0)
+    config_menu.add_command(label="Configurar backup (Google Drive)...", command=lambda: configurar_backup_google_drive(root))
+    config_menu.add_command(label="Mostrar pasta atual", command=lambda: mostrar_backup_google_drive(root))
+    config_menu.add_separator()
+    config_menu.add_command(label="Desativar backup externo", command=lambda: desativar_backup_google_drive(root))
+    menubar.add_cascade(label="Configurações", menu=config_menu)
+
+    config_menu.add_command(
+    label="Importar planilha inicial (Excel)...",
+    command=lambda: importar_planilha_excel(root)
+)
+    
+    config_menu.add_command(
+    label="Restaurar do Google Drive",
+    command=lambda: restaurar_backup_drive(root)
+)
+    
+    # ===== Visual (opcional) =====
     if TEMA_OK:
-        menubar = tk.Menu(root)
         visual = tk.Menu(menubar, tearoff=0)
 
         def usar_dark():
-            sv_ttk.set_theme("dark")
+                sv_ttk.set_theme("dark")
 
         def usar_light():
-            sv_ttk.set_theme("light")
+                sv_ttk.set_theme("light")
 
         visual.add_command(label="Tema claro", command=usar_light)
         visual.add_command(label="Tema escuro", command=usar_dark)
         menubar.add_cascade(label="Visual", menu=visual)
-        root.config(menu=menubar)
+
+    root.config(menu=menubar)
 
     # ===== LAYOUT PRINCIPAL =====
     frame = ttk.Frame(root, padding=16)

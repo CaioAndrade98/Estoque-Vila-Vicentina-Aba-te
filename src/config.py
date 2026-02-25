@@ -35,6 +35,7 @@ DADOS_DIR = pasta_dados()
 ARQUIVO_DADOS = DADOS_DIR / "dados.json"
 BACKUP_DIR = DADOS_DIR / "backup"
 BACKUP_DIR.mkdir(exist_ok=True)
+ARQUIVO_CONFIG = DADOS_DIR / "config_usuario.json"
 
 HISTORICO_DIR = DADOS_DIR / "historico"
 ARQUIVO_HISTORICO = HISTORICO_DIR / "movimentos.jsonl"
